@@ -14,15 +14,15 @@ mod qml_app {
     use std::fmt::Write as _;
     use std::fs;
     use std::hash::{Hash, Hasher};
-    use std::io;
+    use std::io::{self, Read, Write};
     use std::path::{Path, PathBuf};
-    use std::process::{Command, Stdio};
+    use std::process::{Child, Command, Stdio};
     use std::sync::{
         Arc, Mutex, OnceLock,
         atomic::{AtomicUsize, Ordering},
     };
     use std::thread;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
     const ROLE_NAME: i32 = qmetaobject::USER_ROLE;
     const ROLE_PATH: i32 = qmetaobject::USER_ROLE + 1;
@@ -39,6 +39,8 @@ mod qml_app {
     const FAVORITES_URI: &str = "virtual://favorites";
     const DEVICES_URI: &str = "virtual://devices";
     const ARCHIVE_URI_PREFIX: &str = "archive://";
+    const GNOME_COPIED_FILES_MIME: &str = "x-special/gnome-copied-files";
+    const URI_LIST_MIME: &str = "text/uri-list";
     const DEFAULT_VIEW_MODE: &str = "Details";
     const DEFAULT_SORT_FIELD: &str = "Name";
     const DEFAULT_GROUPING: &str = "None";
@@ -132,6 +134,36 @@ mod qml_app {
         result: Result<Vec<LoadedEntry>, String>,
     }
 
+    struct OperationProgress {
+        title: String,
+        detail: String,
+        bytes_done: u64,
+        bytes_total: u64,
+        bytes_per_second: f64,
+    }
+
+    struct OperationResult {
+        title: String,
+        cut: bool,
+        clear_desktop_clipboard: bool,
+        result: Result<(), String>,
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum PasteConflictMode {
+        Rename,
+        Overwrite,
+    }
+
+    impl PasteConflictMode {
+        fn from_qml(value: &str) -> Self {
+            match value {
+                "overwrite" => Self::Overwrite,
+                _ => Self::Rename,
+            }
+        }
+    }
+
     #[derive(QObject, Default)]
     struct FilesModel {
         #[qt_base_class = "QAbstractListModel"]
@@ -170,11 +202,20 @@ mod qml_app {
         terminal_output_changed: qt_signal!(),
         can_paste: qt_property!(bool; NOTIFY can_paste_changed),
         can_paste_changed: qt_signal!(),
+        operation_active: qt_property!(bool; NOTIFY operation_changed),
+        operation_title: qt_property!(QString; NOTIFY operation_changed),
+        operation_detail: qt_property!(QString; NOTIFY operation_changed),
+        operation_completed: qt_property!(f64; NOTIFY operation_changed),
+        operation_total: qt_property!(f64; NOTIFY operation_changed),
+        operation_speed: qt_property!(f64; NOTIFY operation_changed),
+        operation_history_json: qt_property!(QString; NOTIFY operation_changed),
+        operation_changed: qt_signal!(),
         thumbnail_jobs: Arc<AtomicUsize>,
         queued_thumbnails: Arc<Mutex<HashSet<PathBuf>>>,
         load_generation: Arc<AtomicUsize>,
         clipboard_paths: Vec<PathBuf>,
         clipboard_cut: bool,
+        desktop_clipboard_owner: Option<Child>,
         history: Vec<PathBuf>,
         history_index: usize,
         load_path: qt_method!(
@@ -473,9 +514,11 @@ mod qml_app {
         ),
         paste_into_current: qt_method!(
             fn paste_into_current(&mut self) {
-                if self.clipboard_paths.is_empty() {
-                    return;
-                }
+                self.paste_into_current_with_conflict_mode(QString::from("rename"));
+            }
+        ),
+        paste_into_current_with_conflict_mode: qt_method!(
+            fn paste_into_current_with_conflict_mode(&mut self, conflict_mode: QString) {
                 let current_path = self.current_path.to_string();
                 if is_read_only_location(&current_path) {
                     self.error_message = QString::from("This folder cannot be modified");
@@ -484,21 +527,40 @@ mod qml_app {
                 }
 
                 let destination = PathBuf::from(&current_path);
-                let result =
-                    paste_clipboard_items(&self.clipboard_paths, &destination, self.clipboard_cut);
-                match result {
-                    Ok(()) => {
-                        if self.clipboard_cut {
-                            self.clear_file_clipboard();
-                        }
-                        self.reload_current_directory();
-                    }
+                let (sources, cut, desktop_clipboard_was_used) = match self.clipboard_sources() {
+                    Ok(Some(clipboard)) => clipboard,
+                    Ok(None) => return,
                     Err(error) => {
                         self.error_message =
-                            QString::from(format!("Failed to paste item: {error}"));
+                            QString::from(format!("Failed to read desktop clipboard: {error}"));
                         self.error_message_changed();
+                        return;
                     }
+                };
+
+                let mode = PasteConflictMode::from_qml(conflict_mode.to_string().as_str());
+                self.start_paste_operation(sources, destination, cut, desktop_clipboard_was_used, mode);
+            }
+        ),
+        paste_conflicts_json: qt_method!(
+            fn paste_conflicts_json(&self) -> QString {
+                let current_path = self.current_path.to_string();
+                if is_read_only_location(&current_path) {
+                    return QString::from("{\"count\":0,\"names\":[]}");
                 }
+
+                let destination = PathBuf::from(&current_path);
+                let (sources, _, _) = match self.clipboard_sources() {
+                    Ok(Some(clipboard)) => clipboard,
+                    Ok(None) | Err(_) => return QString::from("{\"count\":0,\"names\":[]}"),
+                };
+
+                let names = paste_conflict_names(&sources, &destination);
+                let payload = serde_json::json!({
+                    "count": names.len(),
+                    "names": names,
+                });
+                QString::from(payload.to_string())
             }
         ),
         drop_paths_into_directory: qt_method!(
@@ -507,6 +569,22 @@ mod qml_app {
                 paths_json: QString,
                 destination_dir: QString,
                 copy: bool,
+            ) {
+                self.drop_paths_into_directory_with_conflict_mode(
+                    paths_json,
+                    destination_dir,
+                    copy,
+                    QString::from("rename"),
+                );
+            }
+        ),
+        drop_paths_into_directory_with_conflict_mode: qt_method!(
+            fn drop_paths_into_directory_with_conflict_mode(
+                &mut self,
+                paths_json: QString,
+                destination_dir: QString,
+                copy: bool,
+                conflict_mode: QString,
             ) {
                 let destination = normalize_path_input(&destination_dir.to_string());
                 if is_read_only_location(&destination.to_string_lossy()) {
@@ -525,20 +603,44 @@ mod qml_app {
                     }
                 };
 
-                match transfer_items_to_directory(&sources, &destination, copy) {
-                    Ok(()) => {
-                        self.reload_current_directory();
-                    }
-                    Err(error) => {
-                        self.error_message = QString::from(format!("Failed to drop item: {error}"));
-                        self.error_message_changed();
-                    }
+                if let Err(error) = validate_transfer_items_to_directory(&sources, &destination) {
+                    self.error_message = QString::from(format!("Failed to drop item: {error}"));
+                    self.error_message_changed();
+                    return;
                 }
+
+                let mode = PasteConflictMode::from_qml(conflict_mode.to_string().as_str());
+                self.start_paste_operation(sources, destination, !copy, false, mode);
+            }
+        ),
+        drop_conflicts_json: qt_method!(
+            fn drop_conflicts_json(&self, paths_json: QString, destination_dir: QString) -> QString {
+                let destination = normalize_path_input(&destination_dir.to_string());
+                if is_read_only_location(&destination.to_string_lossy()) {
+                    return QString::from("{\"count\":0,\"names\":[]}");
+                }
+
+                let sources = match decode_paths_json(&paths_json.to_string(), "drop did not contain any local file paths") {
+                    Ok(sources) => sources,
+                    Err(_) => return QString::from("{\"count\":0,\"names\":[]}"),
+                };
+
+                let names = paste_conflict_names(&sources, &destination);
+                let payload = serde_json::json!({
+                    "count": names.len(),
+                    "names": names,
+                });
+                QString::from(payload.to_string())
             }
         ),
         set_selected_path: qt_method!(
             fn set_selected_path(&mut self, path: QString) {
                 self.update_selected_info(path.to_string().as_str());
+            }
+        ),
+        desktop_clipboard_has_files: qt_method!(
+            fn desktop_clipboard_has_files(&self) -> bool {
+                desktop_file_clipboard_has_files()
             }
         ),
         current_paths_json: qt_method!(
@@ -712,6 +814,14 @@ mod qml_app {
             self.clipboard_paths.clear();
             self.clipboard_paths.extend(paths);
             self.clipboard_cut = cut;
+            match write_desktop_file_clipboard(&self.clipboard_paths, cut) {
+                Ok(owner) => self.replace_desktop_clipboard_owner(owner),
+                Err(error) => {
+                    self.error_message =
+                        QString::from(format!("Using app clipboard only: {error}"));
+                    self.error_message_changed();
+                }
+            }
             if !self.can_paste {
                 self.can_paste = true;
                 self.can_paste_changed();
@@ -721,10 +831,156 @@ mod qml_app {
         fn clear_file_clipboard(&mut self) {
             self.clipboard_paths.clear();
             self.clipboard_cut = false;
+            self.stop_desktop_clipboard_owner();
             if self.can_paste {
                 self.can_paste = false;
                 self.can_paste_changed();
             }
+        }
+
+        fn replace_desktop_clipboard_owner(&mut self, owner: Child) {
+            self.stop_desktop_clipboard_owner();
+            self.desktop_clipboard_owner = Some(owner);
+        }
+
+        fn stop_desktop_clipboard_owner(&mut self) {
+            if let Some(mut owner) = self.desktop_clipboard_owner.take() {
+                let _ = owner.kill();
+                let _ = owner.wait();
+            }
+        }
+
+        fn clipboard_sources(&self) -> io::Result<Option<(Vec<PathBuf>, bool, bool)>> {
+            match read_desktop_file_clipboard()? {
+                Some((paths, cut)) => Ok(Some((paths, cut, true))),
+                None => {
+                    if self.clipboard_paths.is_empty() {
+                        Ok(None)
+                    } else {
+                        Ok(Some((self.clipboard_paths.clone(), self.clipboard_cut, false)))
+                    }
+                }
+            }
+        }
+
+        fn start_paste_operation(
+            &mut self,
+            sources: Vec<PathBuf>,
+            destination: PathBuf,
+            cut: bool,
+            desktop_clipboard_was_used: bool,
+            conflict_mode: PasteConflictMode,
+        ) {
+            if self.operation_active {
+                self.error_message = QString::from("Another file operation is already running");
+                self.error_message_changed();
+                return;
+            }
+
+            let title = if cut { "Moving items" } else { "Copying items" }.to_string();
+            let total_bytes = total_size_bytes(&sources);
+            self.operation_active = true;
+            self.operation_title = QString::from(title.clone());
+            self.operation_detail = QString::from("Preparing...");
+            self.operation_completed = 0.0;
+            self.operation_total = total_bytes as f64;
+            self.operation_speed = 0.0;
+            self.operation_history_json = QString::from("[]");
+            self.operation_changed();
+
+            let qptr = QPointer::from(&*self);
+            let apply_progress = qmetaobject::queued_callback(move |progress: OperationProgress| {
+                if let Some(model) = qptr.as_pinned() {
+                    model.borrow_mut().apply_operation_progress(progress);
+                }
+            });
+
+            let qptr = QPointer::from(&*self);
+            let apply_result = qmetaobject::queued_callback(move |result: OperationResult| {
+                if let Some(model) = qptr.as_pinned() {
+                    model.borrow_mut().apply_operation_result(result);
+                }
+            });
+
+            thread::spawn(move || {
+                let operation_title = title.clone();
+                let result = paste_clipboard_items(
+                    &sources,
+                    &destination,
+                    cut,
+                    conflict_mode,
+                    total_bytes,
+                    |bytes_done, bytes_total, bytes_per_second, path| {
+                        let detail = path
+                            .file_name()
+                            .map(|name| name.to_string_lossy().to_string())
+                            .unwrap_or_else(|| path.display().to_string());
+                        apply_progress(OperationProgress {
+                            title: operation_title.clone(),
+                            detail,
+                            bytes_done,
+                            bytes_total,
+                            bytes_per_second,
+                        });
+                    },
+                )
+                .map_err(|error| format!("Failed to paste item: {error}"));
+
+                apply_result(OperationResult {
+                    title,
+                    cut,
+                    clear_desktop_clipboard: desktop_clipboard_was_used,
+                    result,
+                });
+            });
+        }
+
+        fn apply_operation_progress(&mut self, progress: OperationProgress) {
+            self.operation_active = true;
+            self.operation_title = QString::from(progress.title);
+            self.operation_detail = QString::from(progress.detail);
+            self.operation_completed = progress.bytes_done as f64;
+            self.operation_total = progress.bytes_total as f64;
+            self.operation_speed = progress.bytes_per_second;
+            self.push_operation_history(progress.bytes_per_second);
+            self.operation_changed();
+        }
+
+        fn apply_operation_result(&mut self, result: OperationResult) {
+            self.operation_active = false;
+            self.operation_title = QString::from(result.title);
+            self.operation_completed = self.operation_total;
+            self.operation_speed = 0.0;
+            match result.result {
+                Ok(()) => {
+                    self.operation_detail = QString::from("Complete");
+                    if result.cut {
+                        self.clear_file_clipboard();
+                        if result.clear_desktop_clipboard {
+                            let _ = clear_desktop_file_clipboard();
+                        }
+                    }
+                    self.reload_current_directory();
+                }
+                Err(error) => {
+                    self.operation_detail = QString::from("Failed");
+                    self.error_message = QString::from(error);
+                    self.error_message_changed();
+                }
+            }
+            self.operation_changed();
+        }
+
+        fn push_operation_history(&mut self, bytes_per_second: f64) {
+            let mut values: Vec<f64> =
+                serde_json::from_str(&self.operation_history_json.to_string())
+                    .unwrap_or_default();
+            values.push(bytes_per_second.max(0.0));
+            if values.len() > 48 {
+                values.drain(0..values.len() - 48);
+            }
+            self.operation_history_json =
+                QString::from(serde_json::to_string(&values).unwrap_or_else(|_| "[]".to_string()));
         }
 
         fn load_path_impl(&mut self, path: PathBuf) {
@@ -2336,7 +2592,14 @@ bpy.ops.render.render(write_still=True)
         fs::rename(path, parent.join(clean_name))
     }
 
-    fn paste_clipboard_items(sources: &[PathBuf], destination: &Path, cut: bool) -> io::Result<()> {
+    fn paste_clipboard_items(
+        sources: &[PathBuf],
+        destination: &Path,
+        cut: bool,
+        conflict_mode: PasteConflictMode,
+        total_bytes: u64,
+        mut on_progress: impl FnMut(u64, u64, f64, &Path),
+    ) -> io::Result<()> {
         if !destination.is_dir() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -2344,6 +2607,8 @@ bpy.ops.render.render(write_still=True)
             ));
         }
 
+        let mut bytes_done = 0_u64;
+        let started_at = Instant::now();
         for source in sources {
             if is_read_only_location(&source.to_string_lossy()) {
                 return Err(io::Error::new(
@@ -2351,18 +2616,178 @@ bpy.ops.render.render(write_still=True)
                     "read-only items cannot be pasted",
                 ));
             }
+            let elapsed = started_at.elapsed().as_secs_f64().max(0.001);
+            on_progress(bytes_done, total_bytes, bytes_done as f64 / elapsed, source);
             let file_name = source.file_name().ok_or_else(|| {
                 io::Error::new(io::ErrorKind::InvalidInput, "item has no file name")
             })?;
-            let target = unique_paste_destination(destination, file_name);
-            if cut {
-                move_item(source, &target)?;
-            } else {
-                copy_item(source, &target)?;
+            let initial_target = destination.join(file_name);
+            if same_file_path(source, &initial_target) {
+                continue;
             }
+
+            let target = match conflict_mode {
+                PasteConflictMode::Rename => unique_paste_destination(destination, file_name),
+                PasteConflictMode::Overwrite => {
+                    remove_existing_target(&initial_target)?;
+                    initial_target
+                }
+            };
+            if cut {
+                move_item_with_progress(source, &target, &mut bytes_done, total_bytes, started_at, &mut on_progress)?;
+            } else {
+                copy_item_with_progress(source, &target, &mut bytes_done, total_bytes, started_at, &mut on_progress)?;
+            }
+            let elapsed = started_at.elapsed().as_secs_f64().max(0.001);
+            on_progress(bytes_done, total_bytes, bytes_done as f64 / elapsed, source);
         }
 
         Ok(())
+    }
+
+    fn paste_conflict_names(sources: &[PathBuf], destination: &Path) -> Vec<String> {
+        sources
+            .iter()
+            .filter_map(|source| {
+                let file_name = source.file_name()?;
+                let target = destination.join(file_name);
+                if target.exists() && !same_file_path(source, &target) {
+                    Some(file_name.to_string_lossy().to_string())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    fn remove_existing_target(target: &Path) -> io::Result<()> {
+        if !target.exists() {
+            return Ok(());
+        }
+        if target.is_dir() {
+            fs::remove_dir_all(target)
+        } else {
+            fs::remove_file(target)
+        }
+    }
+
+    fn same_file_path(left: &Path, right: &Path) -> bool {
+        match (left.canonicalize(), right.canonicalize()) {
+            (Ok(left), Ok(right)) => left == right,
+            _ => left == right,
+        }
+    }
+
+    fn total_size_bytes(paths: &[PathBuf]) -> u64 {
+        paths.iter().map(|path| path_size_bytes(path).unwrap_or(0)).sum()
+    }
+
+    fn path_size_bytes(path: &Path) -> io::Result<u64> {
+        let metadata = fs::symlink_metadata(path)?;
+        if metadata.is_dir() {
+            let mut total = 0_u64;
+            for entry_result in fs::read_dir(path)? {
+                let entry = entry_result?;
+                total = total.saturating_add(path_size_bytes(&entry.path()).unwrap_or(0));
+            }
+            Ok(total)
+        } else {
+            Ok(metadata.len())
+        }
+    }
+
+    fn copy_item_with_progress(
+        source: &Path,
+        target: &Path,
+        bytes_done: &mut u64,
+        bytes_total: u64,
+        started_at: Instant,
+        on_progress: &mut impl FnMut(u64, u64, f64, &Path),
+    ) -> io::Result<()> {
+        let metadata = fs::symlink_metadata(source)?;
+        if metadata.is_dir() {
+            fs::create_dir(target)?;
+            for entry_result in fs::read_dir(source)? {
+                let entry = entry_result?;
+                let child_source = entry.path();
+                let child_target = target.join(entry.file_name());
+                copy_item_with_progress(
+                    &child_source,
+                    &child_target,
+                    bytes_done,
+                    bytes_total,
+                    started_at,
+                    on_progress,
+                )?;
+            }
+            Ok(())
+        } else {
+            copy_file_with_progress(
+                source,
+                target,
+                bytes_done,
+                bytes_total,
+                started_at,
+                on_progress,
+            )
+        }
+    }
+
+    fn copy_file_with_progress(
+        source: &Path,
+        target: &Path,
+        bytes_done: &mut u64,
+        bytes_total: u64,
+        started_at: Instant,
+        on_progress: &mut impl FnMut(u64, u64, f64, &Path),
+    ) -> io::Result<()> {
+        let mut input = fs::File::open(source)?;
+        let mut output = fs::File::create(target)?;
+        let mut buffer = [0_u8; 1024 * 1024];
+        loop {
+            let read = input.read(&mut buffer)?;
+            if read == 0 {
+                break;
+            }
+            output.write_all(&buffer[..read])?;
+            *bytes_done = bytes_done.saturating_add(read as u64);
+            let elapsed = started_at.elapsed().as_secs_f64().max(0.001);
+            on_progress(*bytes_done, bytes_total, *bytes_done as f64 / elapsed, source);
+        }
+        Ok(())
+    }
+
+    fn move_item_with_progress(
+        source: &Path,
+        target: &Path,
+        bytes_done: &mut u64,
+        bytes_total: u64,
+        started_at: Instant,
+        on_progress: &mut impl FnMut(u64, u64, f64, &Path),
+    ) -> io::Result<()> {
+        match fs::rename(source, target) {
+            Ok(()) => {
+                *bytes_done = bytes_done.saturating_add(path_size_bytes(target).unwrap_or(0));
+                let elapsed = started_at.elapsed().as_secs_f64().max(0.001);
+                on_progress(*bytes_done, bytes_total, *bytes_done as f64 / elapsed, source);
+                Ok(())
+            }
+            Err(rename_error) => {
+                copy_item_with_progress(
+                    source,
+                    target,
+                    bytes_done,
+                    bytes_total,
+                    started_at,
+                    on_progress,
+                )?;
+                remove_item(source).map_err(|remove_error| {
+                    io::Error::other(format!(
+                        "moved by copy, but failed to remove original after rename failed ({rename_error}): {remove_error}"
+                    ))
+                })
+            }
+        }
     }
 
     fn decode_paths_json(paths_json: &str, empty_message: &str) -> io::Result<Vec<PathBuf>> {
@@ -2381,11 +2806,186 @@ bpy.ops.render.render(write_still=True)
         Ok(paths)
     }
 
-    fn transfer_items_to_directory(
-        sources: &[PathBuf],
-        destination: &Path,
-        copy: bool,
-    ) -> io::Result<()> {
+    fn desktop_file_clipboard_has_files() -> bool {
+        match clipboard_mime_types() {
+            Ok(mime_types) => {
+                mime_types.iter().any(|mime_type| {
+                    mime_type == GNOME_COPIED_FILES_MIME || mime_type == URI_LIST_MIME
+                })
+            }
+            Err(_) => false,
+        }
+    }
+
+    fn write_desktop_file_clipboard(paths: &[PathBuf], cut: bool) -> io::Result<Child> {
+        if paths.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "clipboard did not contain any local file paths",
+            ));
+        }
+        if !command_exists("wl-copy") {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "wl-copy is not installed",
+            ));
+        }
+
+        let action = if cut { "cut" } else { "copy" };
+        let mut data = String::from(action);
+        data.push('\n');
+        for path in paths {
+            data.push_str(&path_to_file_uri(path));
+            data.push('\n');
+        }
+
+        write_clipboard_mime(GNOME_COPIED_FILES_MIME, &data)
+    }
+
+    fn clear_desktop_file_clipboard() -> io::Result<()> {
+        if !command_exists("wl-copy") {
+            return Ok(());
+        }
+        let status = Command::new("wl-copy").arg("--clear").status()?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(io::Error::other(format!("wl-copy exited with status {status}")))
+        }
+    }
+
+    fn write_clipboard_mime(mime_type: &str, data: &str) -> io::Result<Child> {
+        let mut child = Command::new("wl-copy")
+            .arg("--foreground")
+            .arg("--type")
+            .arg(mime_type)
+            .stdin(Stdio::piped())
+            .spawn()?;
+        if let Some(stdin) = child.stdin.as_mut() {
+            stdin.write_all(data.as_bytes())?;
+        }
+        drop(child.stdin.take());
+        Ok(child)
+    }
+
+    fn read_desktop_file_clipboard() -> io::Result<Option<(Vec<PathBuf>, bool)>> {
+        if !command_exists("wl-paste") {
+            return Ok(None);
+        }
+
+        let mime_types = clipboard_mime_types()?;
+        if mime_types
+            .iter()
+            .any(|mime_type| mime_type == GNOME_COPIED_FILES_MIME)
+        {
+            let data = read_clipboard_mime(GNOME_COPIED_FILES_MIME)?;
+            return parse_gnome_copied_files(&data).map(Some);
+        }
+
+        if mime_types.iter().any(|mime_type| mime_type == URI_LIST_MIME) {
+            let data = read_clipboard_mime(URI_LIST_MIME)?;
+            let paths = parse_uri_list(&data);
+            if paths.is_empty() {
+                return Ok(None);
+            }
+            return Ok(Some((paths, false)));
+        }
+
+        Ok(None)
+    }
+
+    fn clipboard_mime_types() -> io::Result<Vec<String>> {
+        if !command_exists("wl-paste") {
+            return Ok(Vec::new());
+        }
+        let output = Command::new("wl-paste").arg("--list-types").output()?;
+        if !output.status.success() {
+            return Ok(Vec::new());
+        }
+        Ok(String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(str::to_string)
+            .collect())
+    }
+
+    fn read_clipboard_mime(mime_type: &str) -> io::Result<String> {
+        let output = Command::new("wl-paste")
+            .arg("--type")
+            .arg(mime_type)
+            .output()?;
+        if !output.status.success() {
+            return Err(io::Error::other(format!(
+                "wl-paste exited with status {}",
+                output.status
+            )));
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    }
+
+    fn parse_gnome_copied_files(data: &str) -> io::Result<(Vec<PathBuf>, bool)> {
+        let mut lines = data.lines();
+        let action = lines.next().unwrap_or("copy").trim();
+        let cut = match action {
+            "cut" => true,
+            "copy" => false,
+            _ => false,
+        };
+        let paths = parse_uri_lines(lines);
+        if paths.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "desktop clipboard did not contain local file paths",
+            ));
+        }
+        Ok((paths, cut))
+    }
+
+    fn parse_uri_list(data: &str) -> Vec<PathBuf> {
+        parse_uri_lines(data.lines())
+    }
+
+    fn parse_uri_lines<'a>(lines: impl IntoIterator<Item = &'a str>) -> Vec<PathBuf> {
+        lines
+            .into_iter()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .filter_map(file_uri_to_path)
+            .collect()
+    }
+
+    fn path_to_file_uri(path: &Path) -> String {
+        let mut uri = String::from("file://");
+        for byte in path.to_string_lossy().as_bytes() {
+            match *byte {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'/' | b'-' | b'_' | b'.' | b'~' => {
+                    uri.push(*byte as char);
+                }
+                byte => {
+                    let _ = write!(uri, "%{byte:02X}");
+                }
+            }
+        }
+        uri
+    }
+
+    fn file_uri_to_path(uri: &str) -> Option<PathBuf> {
+        let path = uri.strip_prefix("file://")?;
+        Some(PathBuf::from(percent_decode(path)))
+    }
+
+    fn command_exists(command: &str) -> bool {
+        env::var_os("PATH")
+            .and_then(|paths| {
+                env::split_paths(&paths)
+                    .map(|path| path.join(command))
+                    .find(|candidate| candidate.is_file())
+            })
+            .is_some()
+    }
+
+    fn validate_transfer_items_to_directory(sources: &[PathBuf], destination: &Path) -> io::Result<()> {
         if !destination.is_dir() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -2412,62 +3012,15 @@ bpy.ops.render.render(write_still=True)
                 ));
             }
 
-            let file_name = source.file_name().ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidInput, "item has no file name")
-            })?;
-            let target = destination.join(file_name);
-            if !copy && source.parent() == Some(destination) {
-                continue;
-            }
-
-            let target = if copy || target.exists() {
-                unique_paste_destination(destination, file_name)
-            } else {
-                target
-            };
-
-            if copy {
-                copy_item(source, &target)?;
-            } else {
-                move_item(source, &target)?;
+            if source.file_name().is_none() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "item has no file name",
+                ));
             }
         }
 
         Ok(())
-    }
-
-    fn copy_item(source: &Path, target: &Path) -> io::Result<()> {
-        let metadata = fs::symlink_metadata(source)?;
-        if metadata.is_dir() {
-            copy_directory(source, target)
-        } else {
-            fs::copy(source, target).map(|_| ())
-        }
-    }
-
-    fn copy_directory(source: &Path, target: &Path) -> io::Result<()> {
-        fs::create_dir(target)?;
-        for entry_result in fs::read_dir(source)? {
-            let entry = entry_result?;
-            let child_source = entry.path();
-            let child_target = target.join(entry.file_name());
-            copy_item(&child_source, &child_target)?;
-        }
-        Ok(())
-    }
-
-    fn move_item(source: &Path, target: &Path) -> io::Result<()> {
-        match fs::rename(source, target) {
-            Ok(()) => Ok(()),
-            Err(rename_error) => {
-                copy_item(source, target)?;
-                remove_item(source).map_err(|remove_error| {
-                    io::Error::other(format!(
-                        "moved by copy, but failed to remove original after rename failed ({rename_error}): {remove_error}"
-                    ))
-                })
-            }
-        }
     }
 
     fn remove_item(path: &Path) -> io::Result<()> {

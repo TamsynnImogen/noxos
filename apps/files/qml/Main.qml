@@ -18,11 +18,19 @@ ApplicationWindow {
     property var selectedPaths: []
     property var selectedPathSet: ({})
     property int selectedCount: selectedPaths.length
+    property var cutPaths: []
+    property var cutPathSet: ({})
+    property var pendingPasteConflicts: ({ count: 0, names: [] })
+    property string pendingConflictKind: "paste"
+    property var pendingDropPaths: []
+    property string pendingDropDestination: ""
+    property bool pendingDropCopy: true
     property string contextMenuPath: ""
     property string contextMenuName: ""
     property bool contextMenuIsDirectory: false
     property bool contextMenuHasTarget: false
     property string activeDragPath: ""
+    property var activeDragPaths: []
     property string dropTargetPath: ""
     property string themeMode: "System"
     property string homePath: Platform.StandardPaths.writableLocation(Platform.StandardPaths.HomeLocation)
@@ -98,6 +106,7 @@ ApplicationWindow {
         target: root.modelRef
         function onCurrent_path_changed() {
             root.clearSelection()
+            root.clearCutIndicators()
         }
     }
 
@@ -324,6 +333,7 @@ ApplicationWindow {
             root.modelRef.copy_paths(JSON.stringify(paths))
         else if (paths.length === 1)
             root.modelRef.copy_path(paths[0])
+        root.clearCutIndicators()
     }
 
     function cutCurrentSelection(path) {
@@ -334,6 +344,7 @@ ApplicationWindow {
             root.modelRef.cut_paths(JSON.stringify(paths))
         else if (paths.length === 1)
             root.modelRef.cut_path(paths[0])
+        root.setCutIndicators(paths)
     }
 
     function selectedPathsForAction(path) {
@@ -357,6 +368,29 @@ ApplicationWindow {
 
     function isPathSelected(path) {
         return !!path && root.selectedPathSet[path] === true
+    }
+
+    function isPathCut(path) {
+        return !!path && root.cutPathSet[path] === true
+    }
+
+    function setCutIndicators(paths) {
+        const nextPaths = []
+        const nextSet = {}
+        for (let i = 0; i < paths.length; ++i) {
+            const path = paths[i]
+            if (!path || path.length === 0 || nextSet[path])
+                continue
+            nextPaths.push(path)
+            nextSet[path] = true
+        }
+        root.cutPaths = nextPaths
+        root.cutPathSet = nextSet
+    }
+
+    function clearCutIndicators() {
+        root.cutPaths = []
+        root.cutPathSet = ({})
     }
 
     function setSelection(paths, focusPath, focusName) {
@@ -438,6 +472,8 @@ ApplicationWindow {
 
     function pathsFromDrop(drop) {
         const paths = []
+        if (root.activeDragPaths.length > 0)
+            return root.activeDragPaths.slice()
         if (root.activeDragPath.length > 0) {
             return root.dragPathsFor(root.activeDragPath)
         }
@@ -492,10 +528,11 @@ ApplicationWindow {
             return
         }
 
-        const internalDrag = root.activeDragPath.length > 0 || (drop.source && drop.source.path && drop.source.path.length > 0)
+        const internalDrag = root.activeDragPaths.length > 0 || root.activeDragPath.length > 0 || (drop.source && drop.source.path && drop.source.path.length > 0)
         const copy = !internalDrag || drop.proposedAction === Qt.CopyAction
-        root.modelRef.drop_paths_into_directory(JSON.stringify(paths), destinationPath, copy)
+        root.requestDrop(paths, destinationPath, copy)
         root.activeDragPath = ""
+        root.activeDragPaths = []
         root.dropTargetPath = ""
         drop.acceptProposedAction()
     }
@@ -540,8 +577,8 @@ ApplicationWindow {
             root.cutCurrentSelection(targetPath)
             return true
         }
-        if (event.key === Qt.Key_V && root.modelRef.can_paste && !root.isReadOnlyPath(root.modelRef.current_path)) {
-            root.modelRef.paste_into_current()
+        if (event.key === Qt.Key_V && root.canPasteIntoCurrentFolder()) {
+            root.requestPaste()
             return true
         }
         if (event.key === Qt.Key_A) {
@@ -549,6 +586,127 @@ ApplicationWindow {
             return true
         }
         return false
+    }
+
+    function canPasteIntoCurrentFolder() {
+        return root.modelRef
+            && !root.isReadOnlyPath(root.modelRef.current_path)
+            && (root.modelRef.can_paste || root.modelRef.desktop_clipboard_has_files())
+    }
+
+    function requestPaste() {
+        if (!root.canPasteIntoCurrentFolder())
+            return
+
+        let conflicts = { count: 0, names: [] }
+        try {
+            conflicts = JSON.parse(root.modelRef.paste_conflicts_json())
+        } catch (error) {
+            console.log("Failed to inspect paste conflicts:", error)
+        }
+
+        if (conflicts.count > 0) {
+            root.pendingConflictKind = "paste"
+            root.pendingPasteConflicts = conflicts
+            pasteConflictDialog.open()
+            return
+        }
+
+        root.performPaste("rename")
+    }
+
+    function requestDrop(paths, destinationPath, copy) {
+        if (!root.modelRef || !paths || paths.length === 0)
+            return
+
+        let conflicts = { count: 0, names: [] }
+        try {
+            conflicts = JSON.parse(root.modelRef.drop_conflicts_json(JSON.stringify(paths), destinationPath))
+        } catch (error) {
+            console.log("Failed to inspect drop conflicts:", error)
+        }
+
+        root.pendingDropPaths = paths.slice()
+        root.pendingDropDestination = destinationPath
+        root.pendingDropCopy = copy
+
+        if (conflicts.count > 0) {
+            root.pendingConflictKind = "drop"
+            root.pendingPasteConflicts = conflicts
+            pasteConflictDialog.open()
+            return
+        }
+
+        root.performDrop("rename")
+    }
+
+    function performPaste(conflictMode) {
+        if (!root.modelRef)
+            return
+        root.modelRef.paste_into_current_with_conflict_mode(conflictMode)
+        root.clearCutIndicators()
+    }
+
+    function performDrop(conflictMode) {
+        if (!root.modelRef || root.pendingDropPaths.length === 0 || root.pendingDropDestination.length === 0)
+            return
+        root.modelRef.drop_paths_into_directory_with_conflict_mode(
+            JSON.stringify(root.pendingDropPaths),
+            root.pendingDropDestination,
+            root.pendingDropCopy,
+            conflictMode
+        )
+        if (!root.pendingDropCopy)
+            root.clearCutIndicators()
+        root.pendingDropPaths = []
+        root.pendingDropDestination = ""
+        root.pendingDropCopy = true
+    }
+
+    function resolvePendingConflict(conflictMode) {
+        if (root.pendingConflictKind === "drop")
+            root.performDrop(conflictMode)
+        else
+            root.performPaste(conflictMode)
+    }
+
+    function operationProgressValue() {
+        if (!root.modelRef || root.modelRef.operation_total <= 0)
+            return 0
+        return Math.max(0, Math.min(1, root.modelRef.operation_completed / root.modelRef.operation_total))
+    }
+
+    function formatBytes(bytes) {
+        if (!bytes || bytes <= 0)
+            return "0 B"
+        const units = ["B", "KiB", "MiB", "GiB", "TiB"]
+        let value = bytes
+        let unit = 0
+        while (value >= 1024 && unit < units.length - 1) {
+            value /= 1024
+            unit += 1
+        }
+        return (unit === 0 ? value.toFixed(0) : value.toFixed(value >= 10 ? 1 : 2)) + " " + units[unit]
+    }
+
+    function operationHistoryValues() {
+        if (!root.modelRef || !root.modelRef.operation_history_json)
+            return []
+        try {
+            return JSON.parse(root.modelRef.operation_history_json)
+        } catch (error) {
+            return []
+        }
+    }
+
+    function beginInternalDrag(path) {
+        root.activeDragPath = path
+        root.activeDragPaths = root.dragPathsFor(path)
+    }
+
+    function clearInternalDrag() {
+        root.activeDragPath = ""
+        root.activeDragPaths = []
     }
 
     function toolbarIconSource(fileName) {
@@ -951,16 +1109,39 @@ ApplicationWindow {
 
                     Item {
                         id: detailsDragAnchor
-                        width: 1
-                        height: 1
-                        opacity: 0
+                        width: 180
+                        height: 34
+                        visible: detailsFileMouse.drag.active
+                        opacity: 0.9
+                        z: 20
                         Drag.active: detailsFileMouse.drag.active
+                        Drag.dragType: Drag.Automatic
                         Drag.source: detailsDelegate
                         Drag.supportedActions: Qt.CopyAction | Qt.MoveAction
                         Drag.proposedAction: Qt.MoveAction
                         Drag.mimeData: { "text/uri-list": root.dragMimeText(path) }
+                        Drag.hotSpot.x: width / 2
+                        Drag.hotSpot.y: height / 2
                         onXChanged: if (!detailsFileMouse.drag.active) x = 0
                         onYChanged: if (!detailsFileMouse.drag.active) y = 0
+
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: 6
+                            color: root.surfaceColor
+                            border.width: 1
+                            border.color: root.accentColor
+                        }
+
+                        Label {
+                            anchors.fill: parent
+                            anchors.leftMargin: 10
+                            anchors.rightMargin: 10
+                            text: root.dragPathsFor(path).length > 1 ? root.dragPathsFor(path).length + " items" : name
+                            color: root.textColor
+                            verticalAlignment: Text.AlignVCenter
+                            elide: Text.ElideRight
+                        }
                     }
 
                     Rectangle {
@@ -975,6 +1156,7 @@ ApplicationWindow {
 
                     Item {
                         anchors.fill: parent
+                        opacity: root.isPathCut(path) ? 0.42 : 1.0
 
                         Item {
                             x: root.detailsHorizontalPadding
@@ -1082,6 +1264,7 @@ ApplicationWindow {
                         acceptedButtons: Qt.LeftButton | Qt.RightButton
                         drag.target: detailsDragAnchor
                         onClicked: {
+                            root.clearInternalDrag()
                             if (mouse.button === Qt.RightButton) {
                                 fileList.currentIndex = index
                                 root.openFileContextMenu(path, name, isDirectory, detailsFileMouse, mouse)
@@ -1093,18 +1276,17 @@ ApplicationWindow {
                             fileList.forceActiveFocus()
                         }
                         onPressed: {
-                            if (mouse.button === Qt.LeftButton && !root.isReadOnlyPath(path))
-                                root.activeDragPath = path
+                            if (mouse.button === Qt.LeftButton && !root.isReadOnlyPath(path)) {
+                                root.beginInternalDrag(path)
+                            }
                         }
                         onReleased: {
                             detailsDragAnchor.x = 0
                             detailsDragAnchor.y = 0
-                            root.activeDragPath = ""
                         }
                         onCanceled: {
                             detailsDragAnchor.x = 0
                             detailsDragAnchor.y = 0
-                            root.activeDragPath = ""
                         }
                         onDoubleClicked: root.activateCurrentSelection(path, isDirectory)
                     }
@@ -1141,6 +1323,7 @@ ApplicationWindow {
                     }
 
                     DropArea {
+                        z: 30
                         anchors.fill: parent
                         enabled: isDirectory && !root.isReadOnlyPath(path)
                         onEntered: function(drag) { root.updateDropTarget(drag, path) }
@@ -1283,14 +1466,37 @@ ApplicationWindow {
 
                 Item {
                     id: compactDragAnchor
-                    width: 1
-                    height: 1
-                    opacity: 0
+                    width: 160
+                    height: 30
+                    visible: compactFileMouse.drag.active
+                    opacity: 0.9
+                    z: 20
                     Drag.active: compactFileMouse.drag.active
+                    Drag.dragType: Drag.Automatic
                     Drag.source: compactDelegate
                     Drag.supportedActions: Qt.CopyAction | Qt.MoveAction
                     Drag.proposedAction: Qt.MoveAction
                     Drag.mimeData: { "text/uri-list": root.dragMimeText(path) }
+                    Drag.hotSpot.x: width / 2
+                    Drag.hotSpot.y: height / 2
+
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: 6
+                        color: root.surfaceColor
+                        border.width: 1
+                        border.color: root.accentColor
+                    }
+
+                    Label {
+                        anchors.fill: parent
+                        anchors.leftMargin: 10
+                        anchors.rightMargin: 10
+                        text: root.dragPathsFor(path).length > 1 ? root.dragPathsFor(path).length + " items" : name
+                        color: root.textColor
+                        verticalAlignment: Text.AlignVCenter
+                        elide: Text.ElideRight
+                    }
                 }
 
                 Rectangle {
@@ -1306,6 +1512,7 @@ ApplicationWindow {
                     anchors.leftMargin: 8
                     anchors.rightMargin: 8
                     spacing: 8
+                    opacity: root.isPathCut(path) ? 0.42 : 1.0
 
                     Item {
                         Layout.preferredWidth: 16
@@ -1371,6 +1578,7 @@ ApplicationWindow {
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
                     drag.target: compactDragAnchor
                     onClicked: {
+                        root.clearInternalDrag()
                         if (mouse.button === Qt.RightButton) {
                             compactList.currentIndex = index
                             root.openFileContextMenu(path, name, isDirectory, compactFileMouse, mouse)
@@ -1382,18 +1590,17 @@ ApplicationWindow {
                         compactList.forceActiveFocus()
                     }
                     onPressed: {
-                        if (mouse.button === Qt.LeftButton && !root.isReadOnlyPath(path))
-                            root.activeDragPath = path
+                        if (mouse.button === Qt.LeftButton && !root.isReadOnlyPath(path)) {
+                            root.beginInternalDrag(path)
+                        }
                     }
                     onReleased: {
                         compactDragAnchor.x = 0
                         compactDragAnchor.y = 0
-                        root.activeDragPath = ""
                     }
                     onCanceled: {
                         compactDragAnchor.x = 0
                         compactDragAnchor.y = 0
-                        root.activeDragPath = ""
                     }
                     onDoubleClicked: root.activateCurrentSelection(path, isDirectory)
                 }
@@ -1431,6 +1638,7 @@ ApplicationWindow {
                 }
 
                 DropArea {
+                    z: 30
                     anchors.fill: parent
                     enabled: isDirectory && !root.isReadOnlyPath(path)
                     onEntered: function(drag) { root.updateDropTarget(drag, path) }
@@ -1522,14 +1730,37 @@ ApplicationWindow {
 
                                     Item {
                                         id: groupedListDragAnchor
-                                        width: 1
-                                        height: 1
-                                        opacity: 0
+                                        width: 150
+                                        height: 28
+                                        visible: groupedListFileMouse.drag.active
+                                        opacity: 0.9
+                                        z: 20
                                         Drag.active: groupedListFileMouse.drag.active
+                                        Drag.dragType: Drag.Automatic
                                         Drag.source: groupedListDelegate
                                         Drag.supportedActions: Qt.CopyAction | Qt.MoveAction
                                         Drag.proposedAction: Qt.MoveAction
                                         Drag.mimeData: { "text/uri-list": root.dragMimeText(modelData.path) }
+                                        Drag.hotSpot.x: width / 2
+                                        Drag.hotSpot.y: height / 2
+
+                                        Rectangle {
+                                            anchors.fill: parent
+                                            radius: 6
+                                            color: root.surfaceColor
+                                            border.width: 1
+                                            border.color: root.accentColor
+                                        }
+
+                                        Label {
+                                            anchors.fill: parent
+                                            anchors.leftMargin: 10
+                                            anchors.rightMargin: 10
+                                            text: root.dragPathsFor(modelData.path).length > 1 ? root.dragPathsFor(modelData.path).length + " items" : modelData.name
+                                            color: root.textColor
+                                            verticalAlignment: Text.AlignVCenter
+                                            elide: Text.ElideRight
+                                        }
                                     }
 
                                     Row {
@@ -1537,6 +1768,7 @@ ApplicationWindow {
                                         anchors.leftMargin: 8
                                         anchors.rightMargin: 8
                                         spacing: 6
+                                        opacity: root.isPathCut(modelData.path) ? 0.42 : 1.0
 
                                         Item {
                                             width: 12
@@ -1609,6 +1841,7 @@ ApplicationWindow {
                                         acceptedButtons: Qt.LeftButton | Qt.RightButton
                                         drag.target: groupedListDragAnchor
                                         onClicked: {
+                                            root.clearInternalDrag()
                                             if (mouse.button === Qt.RightButton) {
                                                 root.openFileContextMenu(modelData.path, modelData.name, modelData.is_directory, groupedListFileMouse, mouse)
                                                 return
@@ -1616,18 +1849,17 @@ ApplicationWindow {
                                             root.selectEntry(modelData.path, modelData.name, mouse.modifiers & Qt.ControlModifier)
                                         }
                                         onPressed: {
-                                            if (mouse.button === Qt.LeftButton && !root.isReadOnlyPath(modelData.path))
-                                                root.activeDragPath = modelData.path
+                                            if (mouse.button === Qt.LeftButton && !root.isReadOnlyPath(modelData.path)) {
+                                                root.beginInternalDrag(modelData.path)
+                                            }
                                         }
                                         onReleased: {
                                             groupedListDragAnchor.x = 0
                                             groupedListDragAnchor.y = 0
-                                            root.activeDragPath = ""
                                         }
                                         onCanceled: {
                                             groupedListDragAnchor.x = 0
                                             groupedListDragAnchor.y = 0
-                                            root.activeDragPath = ""
                                         }
                                         onDoubleClicked: root.activateCurrentSelection(modelData.path, modelData.is_directory)
                                     }
@@ -1670,6 +1902,7 @@ ApplicationWindow {
                                     }
 
                                     DropArea {
+                                        z: 30
                                         anchors.fill: parent
                                         enabled: modelData.is_directory && !root.isReadOnlyPath(modelData.path)
                                         onEntered: function(drag) { root.updateDropTarget(drag, modelData.path) }
@@ -1751,14 +1984,37 @@ ApplicationWindow {
 
                 Item {
                     id: iconDragAnchor
-                    width: 1
-                    height: 1
-                    opacity: 0
+                    width: 150
+                    height: 34
+                    visible: iconFileMouse.drag.active
+                    opacity: 0.9
+                    z: 20
                     Drag.active: iconFileMouse.drag.active
+                    Drag.dragType: Drag.Automatic
                     Drag.source: iconDelegate
                     Drag.supportedActions: Qt.CopyAction | Qt.MoveAction
                     Drag.proposedAction: Qt.MoveAction
                     Drag.mimeData: { "text/uri-list": root.dragMimeText(path) }
+                    Drag.hotSpot.x: width / 2
+                    Drag.hotSpot.y: height / 2
+
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: 6
+                        color: root.surfaceColor
+                        border.width: 1
+                        border.color: root.accentColor
+                    }
+
+                    Label {
+                        anchors.fill: parent
+                        anchors.leftMargin: 10
+                        anchors.rightMargin: 10
+                        text: root.dragPathsFor(path).length > 1 ? root.dragPathsFor(path).length + " items" : name
+                        color: root.textColor
+                        verticalAlignment: Text.AlignVCenter
+                        elide: Text.ElideRight
+                    }
                 }
 
                 Rectangle {
@@ -1775,6 +2031,7 @@ ApplicationWindow {
                     anchors.horizontalCenter: parent.horizontalCenter
                     spacing: 8
                     width: parent.width - 12
+                    opacity: root.isPathCut(path) ? 0.42 : 1.0
 
                     Item {
                         width: 42
@@ -1840,6 +2097,7 @@ ApplicationWindow {
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
                     drag.target: iconDragAnchor
                     onClicked: {
+                        root.clearInternalDrag()
                         if (mouse.button === Qt.RightButton) {
                             iconGrid.currentIndex = index
                             root.openFileContextMenu(path, name, isDirectory, iconFileMouse, mouse)
@@ -1851,18 +2109,17 @@ ApplicationWindow {
                         iconGrid.forceActiveFocus()
                     }
                     onPressed: {
-                        if (mouse.button === Qt.LeftButton && !root.isReadOnlyPath(path))
-                            root.activeDragPath = path
+                        if (mouse.button === Qt.LeftButton && !root.isReadOnlyPath(path)) {
+                            root.beginInternalDrag(path)
+                        }
                     }
                     onReleased: {
                         iconDragAnchor.x = 0
                         iconDragAnchor.y = 0
-                        root.activeDragPath = ""
                     }
                     onCanceled: {
                         iconDragAnchor.x = 0
                         iconDragAnchor.y = 0
-                        root.activeDragPath = ""
                     }
                     onDoubleClicked: root.activateCurrentSelection(path, isDirectory)
                 }
@@ -1901,6 +2158,7 @@ ApplicationWindow {
                 }
 
                 DropArea {
+                    z: 30
                     anchors.fill: parent
                     enabled: isDirectory && !root.isReadOnlyPath(path)
                     onEntered: function(drag) { root.updateDropTarget(drag, path) }
@@ -1993,14 +2251,37 @@ ApplicationWindow {
 
                                     Item {
                                         id: groupedIconDragAnchor
-                                        width: 1
-                                        height: 1
-                                        opacity: 0
+                                        width: 150
+                                        height: 34
+                                        visible: groupedIconFileMouse.drag.active
+                                        opacity: 0.9
+                                        z: 20
                                         Drag.active: groupedIconFileMouse.drag.active
+                                        Drag.dragType: Drag.Automatic
                                         Drag.source: groupedIconDelegate
                                         Drag.supportedActions: Qt.CopyAction | Qt.MoveAction
                                         Drag.proposedAction: Qt.MoveAction
                                         Drag.mimeData: { "text/uri-list": root.dragMimeText(modelData.path) }
+                                        Drag.hotSpot.x: width / 2
+                                        Drag.hotSpot.y: height / 2
+
+                                        Rectangle {
+                                            anchors.fill: parent
+                                            radius: 6
+                                            color: root.surfaceColor
+                                            border.width: 1
+                                            border.color: root.accentColor
+                                        }
+
+                                        Label {
+                                            anchors.fill: parent
+                                            anchors.leftMargin: 10
+                                            anchors.rightMargin: 10
+                                            text: root.dragPathsFor(modelData.path).length > 1 ? root.dragPathsFor(modelData.path).length + " items" : modelData.name
+                                            color: root.textColor
+                                            verticalAlignment: Text.AlignVCenter
+                                            elide: Text.ElideRight
+                                        }
                                     }
 
                                     Rectangle {
@@ -2017,6 +2298,7 @@ ApplicationWindow {
                                         anchors.horizontalCenter: parent.horizontalCenter
                                         spacing: 8
                                         width: parent.width - 10
+                                        opacity: root.isPathCut(modelData.path) ? 0.42 : 1.0
 
                                         Item {
                                             width: 56
@@ -2082,6 +2364,7 @@ ApplicationWindow {
                                         acceptedButtons: Qt.LeftButton | Qt.RightButton
                                         drag.target: groupedIconDragAnchor
                                         onClicked: {
+                                            root.clearInternalDrag()
                                             if (mouse.button === Qt.RightButton) {
                                                 root.openFileContextMenu(modelData.path, modelData.name, modelData.is_directory, groupedIconFileMouse, mouse)
                                                 return
@@ -2089,18 +2372,17 @@ ApplicationWindow {
                                             root.selectEntry(modelData.path, modelData.name, mouse.modifiers & Qt.ControlModifier)
                                         }
                                         onPressed: {
-                                            if (mouse.button === Qt.LeftButton && !root.isReadOnlyPath(modelData.path))
-                                                root.activeDragPath = modelData.path
+                                            if (mouse.button === Qt.LeftButton && !root.isReadOnlyPath(modelData.path)) {
+                                                root.beginInternalDrag(modelData.path)
+                                            }
                                         }
                                         onReleased: {
                                             groupedIconDragAnchor.x = 0
                                             groupedIconDragAnchor.y = 0
-                                            root.activeDragPath = ""
                                         }
                                         onCanceled: {
                                             groupedIconDragAnchor.x = 0
                                             groupedIconDragAnchor.y = 0
-                                            root.activeDragPath = ""
                                         }
                                         onDoubleClicked: root.activateCurrentSelection(modelData.path, modelData.is_directory)
                                     }
@@ -2135,6 +2417,7 @@ ApplicationWindow {
                                     }
 
                                     DropArea {
+                                        z: 30
                                         anchors.fill: parent
                                         enabled: modelData.is_directory && !root.isReadOnlyPath(modelData.path)
                                         onEntered: function(drag) { root.updateDropTarget(drag, modelData.path) }
@@ -2738,6 +3021,222 @@ ApplicationWindow {
         }
     }
 
+    Dialog {
+        id: pasteConflictDialog
+        title: root.pendingConflictKind === "drop" ? "Drop Conflict" : "Paste Conflict"
+        modal: true
+        anchors.centerIn: Overlay.overlay
+        standardButtons: Dialog.NoButton
+
+        contentItem: ColumnLayout {
+            spacing: 12
+            width: 420
+
+            Label {
+                Layout.fillWidth: true
+                text: root.pendingPasteConflicts.count === 1
+                    ? "An item with this name already exists in the destination."
+                    : root.pendingPasteConflicts.count + " items with these names already exist in the destination."
+                color: root.textColor
+                wrapMode: Text.WordWrap
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: Math.min(150, Math.max(42, conflictNamesColumn.implicitHeight + 16))
+                color: root.inputColor
+                border.width: 1
+                border.color: root.borderColor
+                radius: 6
+                clip: true
+
+                ScrollView {
+                    anchors.fill: parent
+                    anchors.margins: 8
+                    clip: true
+
+                    Column {
+                        id: conflictNamesColumn
+                        width: parent.width
+                        spacing: 4
+
+                        Repeater {
+                            model: root.pendingPasteConflicts.names || []
+
+                            Label {
+                                width: conflictNamesColumn.width
+                                text: modelData
+                                color: root.textColor
+                                elide: Text.ElideMiddle
+                                font.pixelSize: 13
+                            }
+                        }
+                    }
+                }
+            }
+
+            Label {
+                Layout.fillWidth: true
+                text: "Rename keeps both copies. Overwrite replaces the existing destination items."
+                color: root.mutedTextColor
+                wrapMode: Text.WordWrap
+                font.pixelSize: 12
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+
+                Item { Layout.fillWidth: true }
+
+                Button {
+                    text: "Cancel"
+                    onClicked: pasteConflictDialog.close()
+                }
+
+                Button {
+                    text: "Rename Copies"
+                    onClicked: {
+                        pasteConflictDialog.close()
+                        root.resolvePendingConflict("rename")
+                    }
+                }
+
+                Button {
+                    text: "Overwrite"
+                    onClicked: {
+                        pasteConflictDialog.close()
+                        root.resolvePendingConflict("overwrite")
+                    }
+                }
+            }
+        }
+    }
+
+    Dialog {
+        id: operationProgressDialog
+        title: root.modelRef ? root.modelRef.operation_title : "File Operation"
+        modal: true
+        visible: root.modelRef && root.modelRef.operation_active
+        closePolicy: Popup.NoAutoClose
+        anchors.centerIn: Overlay.overlay
+        standardButtons: Dialog.NoButton
+
+        contentItem: ColumnLayout {
+            spacing: 12
+            width: 460
+            property bool expanded: false
+
+            Label {
+                Layout.fillWidth: true
+                text: root.modelRef ? root.modelRef.operation_detail : ""
+                color: root.textColor
+                elide: Text.ElideMiddle
+            }
+
+            ProgressBar {
+                Layout.fillWidth: true
+                from: 0
+                to: 1
+                value: root.operationProgressValue()
+                indeterminate: root.modelRef && root.modelRef.operation_total <= 0
+            }
+
+            Label {
+                Layout.fillWidth: true
+                text: root.modelRef && root.modelRef.operation_total > 0
+                    ? root.formatBytes(root.modelRef.operation_completed) + " of " + root.formatBytes(root.modelRef.operation_total)
+                    : "Working..."
+                color: root.mutedTextColor
+                horizontalAlignment: Text.AlignRight
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+
+                Label {
+                    Layout.fillWidth: true
+                    text: root.modelRef ? root.formatBytes(root.modelRef.operation_speed) + "/s" : "0 B/s"
+                    color: root.mutedTextColor
+                }
+
+                Button {
+                    text: parent.parent.expanded ? "Hide Details" : "Details"
+                    onClicked: parent.parent.expanded = !parent.parent.expanded
+                }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: parent.expanded ? 120 : 0
+                visible: parent.expanded
+                color: root.inputColor
+                border.width: 1
+                border.color: root.borderColor
+                radius: 6
+
+                Canvas {
+                    id: speedGraph
+                    anchors.fill: parent
+                    anchors.margins: 10
+                    property var values: root.operationHistoryValues()
+                    onValuesChanged: requestPaint()
+
+                    Connections {
+                        target: root.modelRef
+                        function onOperation_changed() {
+                            speedGraph.values = root.operationHistoryValues()
+                            speedGraph.requestPaint()
+                        }
+                    }
+
+                    onPaint: {
+                        const ctx = getContext("2d")
+                        ctx.reset()
+                        ctx.clearRect(0, 0, width, height)
+                        ctx.strokeStyle = root.borderColor
+                        ctx.lineWidth = 1
+                        ctx.beginPath()
+                        ctx.moveTo(0, height - 0.5)
+                        ctx.lineTo(width, height - 0.5)
+                        ctx.stroke()
+
+                        if (!values || values.length < 2)
+                            return
+
+                        let maxValue = 1
+                        for (let i = 0; i < values.length; ++i)
+                            maxValue = Math.max(maxValue, values[i])
+
+                        ctx.strokeStyle = root.accentColor
+                        ctx.lineWidth = 2
+                        ctx.beginPath()
+                        for (let i = 0; i < values.length; ++i) {
+                            const x = values.length === 1 ? 0 : (i / (values.length - 1)) * width
+                            const y = height - ((values[i] / maxValue) * (height - 4)) - 2
+                            if (i === 0)
+                                ctx.moveTo(x, y)
+                            else
+                                ctx.lineTo(x, y)
+                        }
+                        ctx.stroke()
+                    }
+                }
+
+                Label {
+                    anchors.left: parent.left
+                    anchors.leftMargin: 10
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: 8
+                    text: "Transfer speed"
+                    color: root.mutedTextColor
+                    font.pixelSize: 11
+                }
+            }
+        }
+    }
+
     Menu {
         id: fileContextMenu
 
@@ -2759,8 +3258,8 @@ ApplicationWindow {
         }
         MenuItem {
             text: "Paste"
-            enabled: root.modelRef && root.modelRef.can_paste && !root.isReadOnlyPath(root.modelRef.current_path)
-            onTriggered: if (root.modelRef) root.modelRef.paste_into_current()
+            enabled: root.canPasteIntoCurrentFolder()
+            onTriggered: root.requestPaste()
         }
         MenuSeparator {}
         MenuItem {
@@ -3677,5 +4176,6 @@ ApplicationWindow {
                 }
             }
         }
+
     }
 }
