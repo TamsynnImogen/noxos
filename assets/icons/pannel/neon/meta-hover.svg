@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="256" height="256" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">NOXpanel Neon03 Meta Menu Icon - Hover</title>
+  <desc id="desc">Hover state angular neon N style meta menu icon for NOXpanel.</desc>
+
+  <defs>
+    <linearGradient id="nox-neon-stroke" x1="12" y1="52" x2="52" y2="12" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#22D3EE"/>
+      <stop offset="0.42" stop-color="#8B5CF6"/>
+      <stop offset="1" stop-color="#F472B6"/>
+    </linearGradient>
+
+    <radialGradient id="hover-bloom" cx="50%" cy="50%" r="70%">
+      <stop offset="0" stop-color="#D946EF" stop-opacity="0.32"/>
+      <stop offset="0.48" stop-color="#7C3AED" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#06B6D4" stop-opacity="0.04"/>
+    </radialGradient>
+
+    <filter id="strong-glow" x="-55%" y="-55%" width="210%" height="210%">
+      <feGaussianBlur stdDeviation="2.2" result="blur"/>
+      <feColorMatrix in="blur" type="matrix"
+        values="0 0 0 0 0.68
+                0 0 0 0 0.16
+                0 0 0 0 1.00
+                0 0 0 0.82 0" result="glow"/>
+      <feMerge>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="tile-glow" x="-35%" y="-35%" width="170%" height="170%">
+      <feDropShadow dx="0" dy="0" stdDeviation="2.2" flood-color="#D946EF" flood-opacity="0.55"/>
+      <feDropShadow dx="0" dy="0" stdDeviation="4.5" flood-color="#06B6D4" flood-opacity="0.22"/>
+      <feDropShadow dx="0" dy="3" stdDeviation="2.2" flood-color="#000000" flood-opacity="0.6"/>
+    </filter>
+  </defs>
+
+  <!-- hover tile -->
+  <rect x="6.5" y="6.5" width="51" height="51" rx="11.5"
+        fill="#0D1020" stroke="url(#nox-neon-stroke)" stroke-width="1.45"
+        filter="url(#tile-glow)"/>
+
+  <!-- hover bloom -->
+  <rect x="9.5" y="9.5" width="45" height="45" rx="8.5"
+        fill="url(#hover-bloom)" opacity="0.9"/>
+
+  <!-- bright edge accents -->
+  <path d="M14.5 18V13.5H23.5" fill="none" stroke="#22D3EE" stroke-width="1.6" stroke-linecap="round"/>
+  <path d="M49.5 46V50.5H40.5" fill="none" stroke="#F472B6" stroke-width="1.6" stroke-linecap="round"/>
+
+  <!-- glyph glow -->
+  <path d="M19 45V19L45 45V19"
+        fill="none"
+        stroke="url(#nox-neon-stroke)"
+        stroke-width="8.5"
+        stroke-linecap="square"
+        stroke-linejoin="miter"
+        opacity="0.5"
+        filter="url(#strong-glow)"/>
+
+  <!-- glyph main -->
+  <path d="M19 45V19L45 45V19"
+        fill="none"
+        stroke="url(#nox-neon-stroke)"
+        stroke-width="4.2"
+        stroke-linecap="square"
+        stroke-linejoin="miter"/>
+
+  <!-- crisp highlight -->
+  <path d="M22.8 39V28.6L41.4 47.2"
+        fill="none"
+        stroke="#ECFEFF"
+        stroke-width="1.15"
+        stroke-linecap="round"
+        opacity="0.72"/>
+
+  <!-- scanline shimmer -->
+  <path d="M14 32H50" stroke="#D946EF" stroke-width="0.7" opacity="0.22"/>
+  <path d="M17 36H47" stroke="#22D3EE" stroke-width="0.55" opacity="0.18"/>
+
+  <!-- hover spark -->
+  <circle cx="48.5" cy="15.5" r="1.7" fill="#F472B6"/>
+</svg>

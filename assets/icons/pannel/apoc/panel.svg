@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1200" height="96" viewBox="0 0 1200 96" xmlns="http://www.w3.org/2000/svg">
+  <title>NOXpanel APOC Resizable Panel Background</title>
+
+  <defs>
+    <!-- Main tactical gradient -->
+    <linearGradient id="apocPanelGradient" x1="0" y1="0" x2="0" y2="96">
+      <stop offset="0" stop-color="#1A1711"/>
+      <stop offset="0.38" stop-color="#0F0D0A"/>
+      <stop offset="1" stop-color="#050505"/>
+    </linearGradient>
+
+    <!-- Gold edge accent -->
+    <linearGradient id="goldEdge" x1="0" y1="0" x2="1200" y2="0">
+      <stop offset="0" stop-color="#8B6914"/>
+      <stop offset="0.48" stop-color="#D4AF37"/>
+      <stop offset="1" stop-color="#F5D36A"/>
+    </linearGradient>
+
+    <!-- Brushed metal sheen -->
+    <linearGradient id="metalHighlight" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFF2C2" stop-opacity="0.10"/>
+      <stop offset="0.2" stop-color="#FFF2C2" stop-opacity="0.04"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+
+    <!-- Industrial texture -->
+    <pattern id="apocGrid" width="14" height="14" patternUnits="userSpaceOnUse">
+      <path d="M14 0H0V14"
+            fill="none"
+            stroke="#D4AF37"
+            stroke-opacity="0.025"
+            stroke-width="1"/>
+    </pattern>
+
+    <!-- Tactical shadow -->
+    <filter id="apocShadow" x="-10%" y="-50%" width="120%" height="200%">
+      <feDropShadow dx="0" dy="6" stdDeviation="10"
+                    flood-color="#000000"
+                    flood-opacity="0.72"/>
+    </filter>
+
+    <!-- Gold glow -->
+    <filter id="goldGlow" x="-20%" y="-50%" width="140%" height="200%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Main scalable body -->
+  <rect x="8" y="8" width="1184" height="80" rx="18"
+        fill="url(#apocPanelGradient)"
+        stroke="#3A2C12"
+        stroke-width="1.4"
+        filter="url(#apocShadow)"/>
+
+  <!-- Matte inner panel -->
+  <rect x="12" y="12" width="1176" height="72" rx="15"
+        fill="#0A0A0A"
+        opacity="0.65"/>
+
+  <!-- Brushed metal overlay -->
+  <rect x="12" y="12" width="1176" height="72" rx="15"
+        fill="url(#metalHighlight)"
+        opacity="0.9"/>
+
+  <!-- Industrial texture -->
+  <rect x="12" y="12" width="1176" height="72" rx="15"
+        fill="url(#apocGrid)"
+        opacity="0.45"/>
+
+  <!-- Top gold accent -->
+  <rect x="42" y="10.5" width="1116" height="2.2" rx="1.1"
+        fill="url(#goldEdge)"
+        opacity="0.92"
+        filter="url(#goldGlow)"/>
+
+  <!-- Bottom tactical accent -->
+  <rect x="160" y="83.5" width="880" height="1.4" rx="0.7"
+        fill="#D4AF37"
+        opacity="0.18"/>
+
+  <!-- Left tactical detail -->
+  <g opacity="0.82">
+    <path d="M24 24H50"
+          stroke="#D4AF37"
+          stroke-width="1.5"
+          stroke-linecap="round"/>
+
+    <path d="M24 31H40"
+          stroke="#8B6914"
+          stroke-width="1.1"
+          stroke-linecap="round"/>
+  </g>
+
+  <!-- Right tactical detail -->
+  <g opacity="0.82">
+    <path d="M1176 24H1150"
+          stroke="#F5D36A"
+          stroke-width="1.5"
+          stroke-linecap="round"/>
+
+    <path d="M1176 31H1160"
+          stroke="#8B6914"
+          stroke-width="1.1"
+          stroke-linecap="round"/>
+  </g>
+
+  <!-- Corner trims -->
+  <path d="M24 18V14H42"
+        fill="none"
+        stroke="#D4AF37"
+        stroke-width="1.45"
+        stroke-linecap="round"
+        opacity="0.9"/>
+
+  <path d="M1176 78V82H1158"
+        fill="none"
+        stroke="#F5D36A"
+        stroke-width="1.45"
+        stroke-linecap="round"
+        opacity="0.9"/>
+
+  <!-- Center reactor indicator -->
+  <g opacity="0.28">
+    <polygon points="600,41 606,44.5 606,51.5 600,55 594,51.5 594,44.5"
+             fill="none"
+             stroke="#D4AF37"
+             stroke-width="1"/>
+
+    <circle cx="600" cy="48" r="2.2"
+            fill="#F5D36A"/>
+  </g>
+
+  <!-- Subtle tactical separators -->
+  <g opacity="0.12">
+    <line x1="180" y1="20" x2="180" y2="76"
+          stroke="#D4AF37"
+          stroke-width="1"/>
+
+    <line x1="1020" y1="20" x2="1020" y2="76"
+          stroke="#D4AF37"
+          stroke-width="1"/>
+  </g>
+</svg>

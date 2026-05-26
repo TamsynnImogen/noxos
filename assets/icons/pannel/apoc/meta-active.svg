@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="256" height="256" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">NOXpanel APOC05 Meta Menu Icon - Active</title>
+  <desc id="desc">Active/open state tactical hex-ring APOC meta menu icon for NOXpanel.</desc>
+
+  <defs>
+    <linearGradient id="apoc-active-gold" x1="9" y1="55" x2="55" y2="9" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#C69214"/>
+      <stop offset="0.38" stop-color="#F0C95A"/>
+      <stop offset="1" stop-color="#FFF1B8"/>
+    </linearGradient>
+
+    <radialGradient id="active-core-glow" cx="50%" cy="48%" r="75%">
+      <stop offset="0" stop-color="#F5D36A" stop-opacity="0.38"/>
+      <stop offset="0.42" stop-color="#D4AF37" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#0A0A0A" stop-opacity="0.02"/>
+    </radialGradient>
+
+    <linearGradient id="panel-shell" x1="8" y1="56" x2="56" y2="8" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#12100B"/>
+      <stop offset="0.5" stop-color="#080808"/>
+      <stop offset="1" stop-color="#231B09"/>
+    </linearGradient>
+
+    <filter id="active-panel-shadow" x="-45%" y="-45%" width="190%" height="190%">
+      <feDropShadow dx="0" dy="0" stdDeviation="3" flood-color="#F0C95A" flood-opacity="0.58"/>
+      <feDropShadow dx="0" dy="5" stdDeviation="2.8" flood-color="#000000" flood-opacity="0.82"/>
+    </filter>
+
+    <filter id="active-gold-glow" x="-70%" y="-70%" width="240%" height="240%">
+      <feGaussianBlur stdDeviation="2.8" result="blur"/>
+      <feColorMatrix in="blur" type="matrix"
+        values="0 0 0 0 1.00
+                0 0 0 0 0.82
+                0 0 0 0 0.30
+                0 0 0 1 0" result="gold"/>
+      <feMerge>
+        <feMergeNode in="gold"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- active tile -->
+  <rect x="5.5" y="5.5" width="53" height="53" rx="10"
+        fill="url(#panel-shell)"
+        stroke="url(#apoc-active-gold)"
+        stroke-width="1.9"
+        filter="url(#active-panel-shadow)"/>
+
+  <!-- active bloom -->
+  <rect x="9" y="9" width="46" height="46" rx="8"
+        fill="url(#active-core-glow)"
+        opacity="1"/>
+
+  <!-- outer pulse frame -->
+  <rect x="7.8" y="7.8" width="48.4" height="48.4" rx="8.7"
+        fill="none"
+        stroke="#F5D36A"
+        stroke-width="0.8"
+        opacity="0.26"/>
+
+  <!-- tactical corner trims -->
+  <path d="M14 17.5V12.8H24"
+        fill="none"
+        stroke="#FFF1B8"
+        stroke-width="1.7"
+        stroke-linecap="round"/>
+
+  <path d="M50 46.5V51.2H40"
+        fill="none"
+        stroke="#FFF1B8"
+        stroke-width="1.7"
+        stroke-linecap="round"/>
+
+  <!-- outer reactor ring glow -->
+  <polygon points="32,15 45,22.5 45,41.5 32,49 19,41.5 19,22.5"
+           fill="none"
+           stroke="url(#apoc-active-gold)"
+           stroke-width="5.4"
+           opacity="0.42"
+           filter="url(#active-gold-glow)"/>
+
+  <!-- outer reactor ring -->
+  <polygon points="32,16 44,23 44,41 32,48 20,41 20,23"
+           fill="none"
+           stroke="url(#apoc-active-gold)"
+           stroke-width="3.6"/>
+
+  <!-- segmented tactical ring -->
+  <path d="M32 20L40 24.8V33.8L32 38.6L24 33.8V24.8Z"
+        fill="none"
+        stroke="#FFF1B8"
+        stroke-width="1.85"
+        opacity="1"/>
+
+  <!-- central power core -->
+  <circle cx="32" cy="29" r="3.7"
+          fill="#FFF1B8"/>
+
+  <circle cx="32" cy="29" r="7.2"
+          fill="none"
+          stroke="#F0C95A"
+          stroke-width="0.7"
+          opacity="0.35"/>
+
+  <!-- lower support -->
+  <path d="M28 39H36"
+        stroke="#FFF1B8"
+        stroke-width="2"
+        stroke-linecap="round"/>
+
+  <!-- internal detailing -->
+  <path d="M23.2 25L28 27.8"
+        stroke="#FFF1B8"
+        stroke-width="1.05"
+        opacity="0.82"/>
+
+  <path d="M40.8 25L36 27.8"
+        stroke="#FFF1B8"
+        stroke-width="1.05"
+        opacity="0.82"/>
+
+  <path d="M24.7 34.8L29.4 32.3"
+        stroke="#D4AF37"
+        stroke-width="0.95"
+        opacity="0.72"/>
+
+  <path d="M39.3 34.8L34.6 32.3"
+        stroke="#D4AF37"
+        stroke-width="0.95"
+        opacity="0.72"/>
+
+  <!-- tactical scan lines -->
+  <path d="M15 31.5H49"
+        stroke="#F0C95A"
+        stroke-width="0.55"
+        opacity="0.14"/>
+
+  <path d="M18 35.2H46"
+        stroke="#D4AF37"
+        stroke-width="0.55"
+        opacity="0.16"/>
+
+  <!-- active status marker -->
+  <circle cx="48.5" cy="15.5" r="2.2"
+          fill="#FFF1B8"/>
+
+  <circle cx="48.5" cy="15.5" r="4.3"
+          fill="none"
+          stroke="#F5D36A"
+          stroke-width="0.6"
+          opacity="0.38"/>
+</svg>

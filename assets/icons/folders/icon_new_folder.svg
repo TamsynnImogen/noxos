@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 24 24"
+     fill="none"
+     role="img"
+     aria-labelledby="title desc">
+
+  <title id="title">New Folder</title>
+  <desc id="desc">A NOXos new folder glyph.</desc>
+
+  <path d="M3.5 7.5C3.5 6.95 3.95 6.5 4.5 6.5H9L10.5 8H19.5C20.05 8 20.5 8.45 20.5 9V17.5C20.5 18.05 20.05 18.5 19.5 18.5H4.5C3.95 18.5 3.5 18.05 3.5 17.5V7.5Z"
+        stroke="#D4AF37"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+
+  <path d="M12 11V16"
+        stroke="#D4AF37"
+        stroke-width="2"
+        stroke-linecap="round"/>
+
+  <path d="M9.5 13.5H14.5"
+        stroke="#D4AF37"
+        stroke-width="2"
+        stroke-linecap="round"/>
+
+</svg>

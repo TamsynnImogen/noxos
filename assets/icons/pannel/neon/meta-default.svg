@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="256" height="256" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">NOXpanel Neon03 Meta Menu Icon - Default</title>
+  <desc id="desc">Angular neon N style meta menu icon for NOXpanel.</desc>
+
+  <defs>
+    <linearGradient id="nox-neon-stroke" x1="12" y1="52" x2="52" y2="12" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#06B6D4"/>
+      <stop offset="0.42" stop-color="#7C3AED"/>
+      <stop offset="1" stop-color="#D946EF"/>
+    </linearGradient>
+
+    <linearGradient id="nox-neon-soft" x1="16" y1="48" x2="48" y2="16" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0EA5E9" stop-opacity="0.22"/>
+      <stop offset="0.55" stop-color="#8B5CF6" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#D946EF" stop-opacity="0.22"/>
+    </linearGradient>
+
+    <filter id="outer-glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="1.6" result="blur"/>
+      <feColorMatrix in="blur" type="matrix"
+        values="0 0 0 0 0.40
+                0 0 0 0 0.10
+                0 0 0 0 1.00
+                0 0 0 0.70 0" result="glow"/>
+      <feMerge>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="panel-shadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#000000" flood-opacity="0.55"/>
+    </filter>
+  </defs>
+
+  <!-- button tile -->
+  <rect x="7" y="7" width="50" height="50" rx="11"
+        fill="#0B0D14" stroke="#2D174B" stroke-width="1.2"
+        filter="url(#panel-shadow)"/>
+
+  <!-- faint inner glass -->
+  <rect x="10" y="10" width="44" height="44" rx="8"
+        fill="url(#nox-neon-soft)" opacity="0.55"/>
+
+  <!-- subtle corner accents -->
+  <path d="M15 18V14H23" fill="none" stroke="#06B6D4" stroke-width="1.4" stroke-linecap="round" opacity="0.85"/>
+  <path d="M49 46V50H41" fill="none" stroke="#D946EF" stroke-width="1.4" stroke-linecap="round" opacity="0.85"/>
+
+  <!-- Neon03 angular N glyph glow -->
+  <path d="M19 45V19L45 45V19"
+        fill="none"
+        stroke="url(#nox-neon-stroke)"
+        stroke-width="7"
+        stroke-linecap="square"
+        stroke-linejoin="miter"
+        opacity="0.38"
+        filter="url(#outer-glow)"/>
+
+  <!-- Neon03 angular N glyph main -->
+  <path d="M19 45V19L45 45V19"
+        fill="none"
+        stroke="url(#nox-neon-stroke)"
+        stroke-width="3.8"
+        stroke-linecap="square"
+        stroke-linejoin="miter"/>
+
+  <!-- inner highlight cutline -->
+  <path d="M23 39V29L41 47"
+        fill="none"
+        stroke="#A5F3FC"
+        stroke-width="1"
+        stroke-linecap="round"
+        opacity="0.55"/>
+
+  <!-- crisp dark separation for small-size readability -->
+  <path d="M23 20L41 38"
+        fill="none"
+        stroke="#05060A"
+        stroke-width="1.1"
+        stroke-linecap="square"
+        opacity="0.45"/>
+
+  <!-- tiny default-state base marker -->
+  <circle cx="48.5" cy="15.5" r="1.35" fill="#D946EF" opacity="0.7"/>
+</svg>

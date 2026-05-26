@@ -1,0 +1,40 @@
+[workspace]
+members = [
+  "apps/bliss-wallpaper",
+  "apps/desktop",
+  "apps/files",
+  "apps/image-viewer",
+  "apps/noxgames",
+  "apps/noxcmd",
+  "crates/file-ops",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+version = "0.1.0"
+authors = ["tamsynn"]
+
+[workspace.lints.clippy]
+checked_conversions = "deny"
+dbg_macro = "deny"
+explicit_into_iter_loop = "deny"
+explicit_iter_loop = "deny"
+filter_map_next = "deny"
+flat_map_option = "deny"
+let_unit_value = "deny"
+manual_assert = "deny"
+manual_ok_or = "deny"
+todo = "deny"
+undocumented_unsafe_blocks = "deny"
+unnecessary_wraps = "deny"
+unwrap_used = "deny"
+useless_transmute = "deny"
+used_underscore_binding = "deny"
+
+[workspace.lints.rust]
+rust_2018_idioms = { level = "deny", priority = -1 }
+unused_lifetimes = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+unused_attributes = "deny"

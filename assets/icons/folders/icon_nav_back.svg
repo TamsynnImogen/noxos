@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">Back</title>
+  <desc id="desc">A NOXos navigation back arrow glyph.</desc>
+  <path d="M14.5 6L8.5 12L14.5 18" stroke="#D4AF37" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

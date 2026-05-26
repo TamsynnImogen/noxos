@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 24 24"
+     fill="none"
+     role="img"
+     aria-labelledby="title desc">
+
+  <title id="title">Settings</title>
+  <desc id="desc">A NOXos settings glyph.</desc>
+
+  <circle cx="12"
+          cy="12"
+          r="3"
+          stroke="#D4AF37"
+          stroke-width="2"/>
+
+  <path d="M12 4.5V6.5"
+        stroke="#D4AF37"
+        stroke-width="2"
+        stroke-linecap="round"/>
+
+  <path d="M12 17.5V19.5"
+        stroke="#D4AF37"
+        stroke-width="2"
+        stroke-linecap="round"/>
+
+  <path d="M19.5 12H17.5"
+        stroke="#D4AF37"
+        stroke-width="2"
+        stroke-linecap="round"/>
+
+  <path d="M6.5 12H4.5"
+        stroke="#D4AF37"
+        stroke-width="2"
+        stroke-linecap="round"/>
+
+  <path d="M17.3 6.7L15.9 8.1"
+        stroke="#D4AF37"
+        stroke-width="2"
+        stroke-linecap="round"/>
+
+  <path d="M8.1 15.9L6.7 17.3"
+        stroke="#D4AF37"
+        stroke-width="2"
+        stroke-linecap="round"/>
+
+  <path d="M17.3 17.3L15.9 15.9"
+        stroke="#D4AF37"
+        stroke-width="2"
+        stroke-linecap="round"/>
+
+  <path d="M8.1 8.1L6.7 6.7"
+        stroke="#D4AF37"
+        stroke-width="2"
+        stroke-linecap="round"/>
+
+</svg>

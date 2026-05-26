@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 24 24"
+     fill="none"
+     role="img"
+     aria-labelledby="title desc">
+
+  <title id="title">New Tab</title>
+  <desc id="desc">A NOXos new tab glyph.</desc>
+
+  <path d="M5.5 6.5H18.5C19.05 6.5 19.5 6.95 19.5 7.5V18.5C19.5 19.05 19.05 19.5 18.5 19.5H5.5C4.95 19.5 4.5 19.05 4.5 18.5V7.5C4.5 6.95 4.95 6.5 5.5 6.5Z"
+        stroke="#D4AF37"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+
+  <path d="M8 4.5H16"
+        stroke="#D4AF37"
+        stroke-width="2"
+        stroke-linecap="round"/>
+
+  <path d="M12 10.5V15.5"
+        stroke="#D4AF37"
+        stroke-width="2"
+        stroke-linecap="round"/>
+
+  <path d="M9.5 13H14.5"
+        stroke="#D4AF37"
+        stroke-width="2"
+        stroke-linecap="round"/>
+
+</svg>

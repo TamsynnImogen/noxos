@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 24 24"
+     fill="none"
+     role="img"
+     aria-labelledby="title desc">
+
+  <title id="title">Sort</title>
+  <desc id="desc">A NOXos sort order glyph.</desc>
+
+  <path d="M7 5V18"
+        stroke="#D4AF37"
+        stroke-width="2"
+        stroke-linecap="round"/>
+
+  <path d="M4.5 15.5L7 18L9.5 15.5"
+        stroke="#D4AF37"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+
+  <path d="M17 19V6"
+        stroke="#D4AF37"
+        stroke-width="2"
+        stroke-linecap="round"/>
+
+  <path d="M14.5 8.5L17 6L19.5 8.5"
+        stroke="#D4AF37"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+
+</svg>

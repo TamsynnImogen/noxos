@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 24 24"
+     fill="none"
+     role="img"
+     aria-labelledby="title desc">
+
+  <title id="title">View Icons</title>
+  <desc id="desc">A NOXos icon grid view glyph.</desc>
+
+  <rect x="4.5" y="4.5"
+        width="5"
+        height="5"
+        rx="1"
+        stroke="#D4AF37"
+        stroke-width="2"/>
+
+  <rect x="14.5" y="4.5"
+        width="5"
+        height="5"
+        rx="1"
+        stroke="#D4AF37"
+        stroke-width="2"/>
+
+  <rect x="4.5" y="14.5"
+        width="5"
+        height="5"
+        rx="1"
+        stroke="#D4AF37"
+        stroke-width="2"/>
+
+  <rect x="14.5" y="14.5"
+        width="5"
+        height="5"
+        rx="1"
+        stroke="#D4AF37"
+        stroke-width="2"/>
+
+</svg>

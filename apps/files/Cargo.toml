@@ -1,0 +1,16 @@
+[package]
+name = "files-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[features]
+default = []
+qml = ["dep:qmetaobject"]
+
+[dependencies]
+file-ops = { path = "../../crates/file-ops" }
+qmetaobject = { version = "0.2.10", optional = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

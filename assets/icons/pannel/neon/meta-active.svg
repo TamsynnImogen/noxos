@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="256" height="256" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">NOXpanel Neon03 Meta Menu Icon - Active</title>
+  <desc id="desc">Active/open state angular neon N style meta menu icon for NOXpanel.</desc>
+
+  <defs>
+    <linearGradient id="nox-active-stroke" x1="10" y1="54" x2="54" y2="10" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#22D3EE"/>
+      <stop offset="0.38" stop-color="#8B5CF6"/>
+      <stop offset="1" stop-color="#FF4FD8"/>
+    </linearGradient>
+
+    <radialGradient id="active-core" cx="50%" cy="48%" r="72%">
+      <stop offset="0" stop-color="#D946EF" stop-opacity="0.42"/>
+      <stop offset="0.42" stop-color="#7C3AED" stop-opacity="0.24"/>
+      <stop offset="1" stop-color="#06B6D4" stop-opacity="0.06"/>
+    </radialGradient>
+
+    <filter id="active-glow" x="-70%" y="-70%" width="240%" height="240%">
+      <feGaussianBlur stdDeviation="3.2" result="blur"/>
+      <feColorMatrix in="blur" type="matrix"
+        values="0 0 0 0 0.78
+                0 0 0 0 0.18
+                0 0 0 0 1.00
+                0 0 0 1 0" result="glow"/>
+      <feMerge>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="panel-active-shadow" x="-45%" y="-45%" width="190%" height="190%">
+      <feDropShadow dx="0" dy="0" stdDeviation="3" flood-color="#D946EF" flood-opacity="0.75"/>
+      <feDropShadow dx="0" dy="0" stdDeviation="5.5" flood-color="#06B6D4" flood-opacity="0.28"/>
+      <feDropShadow dx="0" dy="4" stdDeviation="2.5" flood-color="#000000" flood-opacity="0.7"/>
+    </filter>
+  </defs>
+
+  <!-- active tile -->
+  <rect x="5.5" y="5.5" width="53" height="53" rx="12"
+        fill="#101225"
+        stroke="url(#nox-active-stroke)"
+        stroke-width="1.8"
+        filter="url(#panel-active-shadow)"/>
+
+  <!-- active glow core -->
+  <rect x="9" y="9" width="46" height="46" rx="9"
+        fill="url(#active-core)"
+        opacity="1"/>
+
+  <!-- outer pulse ring -->
+  <rect x="7.8" y="7.8" width="48.4" height="48.4" rx="10"
+        fill="none"
+        stroke="#D946EF"
+        stroke-width="0.8"
+        opacity="0.32"/>
+
+  <!-- corner accents -->
+  <path d="M14 18V13H24"
+        fill="none"
+        stroke="#22D3EE"
+        stroke-width="1.8"
+        stroke-linecap="round"/>
+
+  <path d="M50 46V51H40"
+        fill="none"
+        stroke="#FF4FD8"
+        stroke-width="1.8"
+        stroke-linecap="round"/>
+
+  <!-- glyph glow -->
+  <path d="M19 45V19L45 45V19"
+        fill="none"
+        stroke="url(#nox-active-stroke)"
+        stroke-width="10"
+        stroke-linecap="square"
+        stroke-linejoin="miter"
+        opacity="0.62"
+        filter="url(#active-glow)"/>
+
+  <!-- glyph main -->
+  <path d="M19 45V19L45 45V19"
+        fill="none"
+        stroke="url(#nox-active-stroke)"
+        stroke-width="4.8"
+        stroke-linecap="square"
+        stroke-linejoin="miter"/>
+
+  <!-- sharp internal highlight -->
+  <path d="M22.5 38.5V28L42 47"
+        fill="none"
+        stroke="#F0FDFF"
+        stroke-width="1.25"
+        stroke-linecap="round"
+        opacity="0.82"/>
+
+  <!-- energy streaks -->
+  <path d="M13 30H51"
+        stroke="#22D3EE"
+        stroke-width="0.7"
+        opacity="0.16"/>
+
+  <path d="M16 34H48"
+        stroke="#FF4FD8"
+        stroke-width="0.7"
+        opacity="0.18"/>
+
+  <!-- active state marker -->
+  <circle cx="49" cy="15" r="2.2" fill="#FF4FD8"/>
+  <circle cx="49" cy="15" r="4.2" fill="none" stroke="#FF4FD8" stroke-width="0.6" opacity="0.35"/>
+</svg>
