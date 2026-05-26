@@ -343,6 +343,41 @@ mod qml_app {
                 }
             }
         ),
+        move_paths_to_trash: qt_method!(
+            fn move_paths_to_trash(&mut self, paths_json: QString) {
+                if is_read_only_location(&self.current_path.to_string()) {
+                    self.error_message = QString::from("Virtual folders cannot be modified");
+                    self.error_message_changed();
+                    return;
+                }
+
+                let paths = match decode_paths_json(&paths_json.to_string(), "selection did not contain any local file paths") {
+                    Ok(paths) => paths,
+                    Err(error) => {
+                        self.error_message =
+                            QString::from(format!("Failed to read selected items: {error}"));
+                        self.error_message_changed();
+                        return;
+                    }
+                };
+
+                for path in paths {
+                    if is_read_only_location(&path.to_string_lossy()) {
+                        self.error_message = QString::from("Read-only items cannot be trashed");
+                        self.error_message_changed();
+                        return;
+                    }
+                    if let Err(error) = trash_path(&path) {
+                        self.error_message =
+                            QString::from(format!("Failed to move item to trash: {error}"));
+                        self.error_message_changed();
+                        return;
+                    }
+                }
+
+                self.reload_current_directory();
+            }
+        ),
         create_folder: qt_method!(
             fn create_folder(&mut self, name: QString) {
                 let name = name.to_string();
@@ -412,6 +447,30 @@ mod qml_app {
                 self.set_file_clipboard(normalize_path_input(&path.to_string()), true);
             }
         ),
+        copy_paths: qt_method!(
+            fn copy_paths(&mut self, paths_json: QString) {
+                match decode_paths_json(&paths_json.to_string(), "selection did not contain any local file paths") {
+                    Ok(paths) => self.set_file_clipboard_paths(paths, false),
+                    Err(error) => {
+                        self.error_message =
+                            QString::from(format!("Failed to read selected items: {error}"));
+                        self.error_message_changed();
+                    }
+                }
+            }
+        ),
+        cut_paths: qt_method!(
+            fn cut_paths(&mut self, paths_json: QString) {
+                match decode_paths_json(&paths_json.to_string(), "selection did not contain any local file paths") {
+                    Ok(paths) => self.set_file_clipboard_paths(paths, true),
+                    Err(error) => {
+                        self.error_message =
+                            QString::from(format!("Failed to read selected items: {error}"));
+                        self.error_message_changed();
+                    }
+                }
+            }
+        ),
         paste_into_current: qt_method!(
             fn paste_into_current(&mut self) {
                 if self.clipboard_paths.is_empty() {
@@ -456,7 +515,7 @@ mod qml_app {
                     return;
                 }
 
-                let sources = match decode_drop_paths_json(&paths_json.to_string()) {
+                let sources = match decode_paths_json(&paths_json.to_string(), "drop did not contain any local file paths") {
                     Ok(sources) => sources,
                     Err(error) => {
                         self.error_message =
@@ -480,6 +539,17 @@ mod qml_app {
         set_selected_path: qt_method!(
             fn set_selected_path(&mut self, path: QString) {
                 self.update_selected_info(path.to_string().as_str());
+            }
+        ),
+        current_paths_json: qt_method!(
+            fn current_paths_json(&self) -> QString {
+                let paths: Vec<String> = self
+                    .entries
+                    .iter()
+                    .map(|entry| entry.path.to_string())
+                    .filter(|path| !path.is_empty() && !is_read_only_location(path))
+                    .collect();
+                QString::from(serde_json::to_string(&paths).unwrap_or_else(|_| "[]".to_string()))
             }
         ),
         execute_terminal_command: qt_method!(
@@ -625,14 +695,22 @@ mod qml_app {
         }
 
         fn set_file_clipboard(&mut self, path: PathBuf, cut: bool) {
-            if path.as_os_str().is_empty() || is_read_only_location(&path.to_string_lossy()) {
+            self.set_file_clipboard_paths(vec![path], cut);
+        }
+
+        fn set_file_clipboard_paths(&mut self, paths: Vec<PathBuf>, cut: bool) {
+            if paths.is_empty()
+                || paths.iter().any(|path| {
+                    path.as_os_str().is_empty() || is_read_only_location(&path.to_string_lossy())
+                })
+            {
                 self.error_message = QString::from("This item cannot be copied");
                 self.error_message_changed();
                 return;
             }
 
             self.clipboard_paths.clear();
-            self.clipboard_paths.push(path);
+            self.clipboard_paths.extend(paths);
             self.clipboard_cut = cut;
             if !self.can_paste {
                 self.can_paste = true;
@@ -2287,7 +2365,7 @@ bpy.ops.render.render(write_still=True)
         Ok(())
     }
 
-    fn decode_drop_paths_json(paths_json: &str) -> io::Result<Vec<PathBuf>> {
+    fn decode_paths_json(paths_json: &str, empty_message: &str) -> io::Result<Vec<PathBuf>> {
         let values: Vec<String> = serde_json::from_str(paths_json)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
         let paths: Vec<PathBuf> = values
@@ -2297,10 +2375,7 @@ bpy.ops.render.render(write_still=True)
             .collect();
 
         if paths.is_empty() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "drop did not contain any local file paths",
-            ));
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, empty_message));
         }
 
         Ok(paths)

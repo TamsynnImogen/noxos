@@ -15,6 +15,9 @@ ApplicationWindow {
     property var devicesRef: (typeof devicesModel !== "undefined") ? devicesModel : null
     property string selectedPath: ""
     property string selectedName: ""
+    property var selectedPaths: []
+    property var selectedPathSet: ({})
+    property int selectedCount: selectedPaths.length
     property string contextMenuPath: ""
     property string contextMenuName: ""
     property bool contextMenuIsDirectory: false
@@ -88,6 +91,13 @@ ApplicationWindow {
         onTriggered: {
             if (root.modelRef && root.modelRef.thumbnail_jobs_pending() > 0)
                 root.modelRef.refresh()
+        }
+    }
+
+    Connections {
+        target: root.modelRef
+        function onCurrent_path_changed() {
+            root.clearSelection()
         }
     }
 
@@ -297,8 +307,129 @@ ApplicationWindow {
     }
 
     function trashCurrentSelection(path) {
-        if (root.modelRef && path.length > 0)
-            root.modelRef.move_to_trash(path)
+        if (!root.modelRef)
+            return
+        const paths = root.selectedPathsForAction(path)
+        if (paths.length > 1)
+            root.modelRef.move_paths_to_trash(JSON.stringify(paths))
+        else if (paths.length === 1)
+            root.modelRef.move_to_trash(paths[0])
+    }
+
+    function copyCurrentSelection(path) {
+        if (!root.modelRef)
+            return
+        const paths = root.selectedPathsForAction(path)
+        if (paths.length > 1)
+            root.modelRef.copy_paths(JSON.stringify(paths))
+        else if (paths.length === 1)
+            root.modelRef.copy_path(paths[0])
+    }
+
+    function cutCurrentSelection(path) {
+        if (!root.modelRef)
+            return
+        const paths = root.selectedPathsForAction(path)
+        if (paths.length > 1)
+            root.modelRef.cut_paths(JSON.stringify(paths))
+        else if (paths.length === 1)
+            root.modelRef.cut_path(paths[0])
+    }
+
+    function selectedPathsForAction(path) {
+        if (path && path.length > 0 && root.isPathSelected(path) && root.selectedPaths.length > 0)
+            return root.selectedPaths.slice()
+        if (root.selectedPaths.length > 0 && (!path || path.length === 0))
+            return root.selectedPaths.slice()
+        return path && path.length > 0 ? [path] : []
+    }
+
+    function dragPathsFor(path) {
+        if (path && root.isPathSelected(path) && root.selectedPaths.length > 0)
+            return root.selectedPaths.slice()
+        return path && path.length > 0 ? [path] : []
+    }
+
+    function dragMimeText(path) {
+        const paths = root.dragPathsFor(path)
+        return paths.map(function(item) { return root.pathToFileUrl(item) }).join("\n")
+    }
+
+    function isPathSelected(path) {
+        return !!path && root.selectedPathSet[path] === true
+    }
+
+    function setSelection(paths, focusPath, focusName) {
+        const nextPaths = []
+        const nextSet = {}
+        for (let i = 0; i < paths.length; ++i) {
+            const path = paths[i]
+            if (!path || path.length === 0 || nextSet[path])
+                continue
+            nextPaths.push(path)
+            nextSet[path] = true
+        }
+        root.selectedPaths = nextPaths
+        root.selectedPathSet = nextSet
+        root.selectedPath = focusPath || (nextPaths.length === 1 ? nextPaths[0] : "")
+        root.selectedName = focusName || ""
+        if (root.modelRef)
+            root.modelRef.set_selected_path(root.selectedPath)
+    }
+
+    function clearSelection() {
+        root.setSelection([], "", "")
+    }
+
+    function selectEntry(path, name, additive) {
+        if (!additive) {
+            root.setSelection([path], path, name)
+            return
+        }
+
+        const paths = root.selectedPaths.slice()
+        if (!root.isPathSelected(path))
+            paths.push(path)
+        root.setSelection(paths, path, name)
+    }
+
+    function toggleEntrySelection(path, name) {
+        const paths = []
+        const selected = root.isPathSelected(path)
+        for (let i = 0; i < root.selectedPaths.length; ++i) {
+            if (root.selectedPaths[i] !== path)
+                paths.push(root.selectedPaths[i])
+        }
+        if (!selected)
+            paths.push(path)
+        root.setSelection(paths, selected ? "" : path, selected ? "" : name)
+    }
+
+    function selectAllEntries() {
+        if (!root.modelRef || !root.modelRef.current_paths_json)
+            return
+        try {
+            const paths = JSON.parse(root.modelRef.current_paths_json())
+            root.setSelection(paths, "", "")
+        } catch (error) {
+            console.log("Failed to select all entries:", error)
+        }
+    }
+
+    function selectionMarkerText(path) {
+        return root.isPathSelected(path) ? "✓" : "+"
+    }
+
+    function selectionMarkerVisible(path, hovered) {
+        return root.isPathSelected(path) || hovered
+    }
+
+    function selectionMarkerColor(path) {
+        return root.isPathSelected(path) ? root.accentColor : root.surfaceColor
+    }
+
+    function selectionMarkerTextColor(path) {
+        return root.isPathSelected(path) ? "white" : root.accentColor
     }
 
     function isReadOnlyPath(path) {
@@ -308,12 +439,10 @@ ApplicationWindow {
     function pathsFromDrop(drop) {
         const paths = []
         if (root.activeDragPath.length > 0) {
-            paths.push(root.activeDragPath)
-            return paths
+            return root.dragPathsFor(root.activeDragPath)
         }
         if (drop.source && drop.source.path && drop.source.path.length > 0) {
-            paths.push(drop.source.path)
-            return paths
+            return root.dragPathsFor(drop.source.path)
         }
 
         if (drop.hasUrls && drop.urls) {
@@ -371,16 +500,9 @@ ApplicationWindow {
         drop.acceptProposedAction()
     }
 
-    function selectEntry(path, name) {
-        root.selectedPath = path
-        root.selectedName = name
-        if (root.modelRef)
-            root.modelRef.set_selected_path(path)
-    }
-
     function openFileContextMenu(path, name, isDirectory, item, mouse) {
-        if (path && path.length > 0)
-            root.selectEntry(path, name)
+        if (path && path.length > 0 && !root.isPathSelected(path))
+            root.selectEntry(path, name, false)
         root.contextMenuPath = path || ""
         root.contextMenuName = name || ""
         root.contextMenuIsDirectory = !!isDirectory
@@ -398,6 +520,7 @@ ApplicationWindow {
         root.contextMenuHasTarget = false
         if (root.modelRef)
             root.modelRef.set_selected_path("")
+        root.clearSelection()
         const pos = item.mapToItem(root.contentItem, mouse.x, mouse.y)
         fileContextMenu.x = pos.x
         fileContextMenu.y = pos.y
@@ -410,15 +533,19 @@ ApplicationWindow {
 
         const targetPath = path && path.length > 0 ? path : root.selectedPath
         if (event.key === Qt.Key_C && targetPath.length > 0 && !root.isReadOnlyPath(targetPath)) {
-            root.modelRef.copy_path(targetPath)
+            root.copyCurrentSelection(targetPath)
             return true
         }
         if (event.key === Qt.Key_X && targetPath.length > 0 && !root.isReadOnlyPath(targetPath)) {
-            root.modelRef.cut_path(targetPath)
+            root.cutCurrentSelection(targetPath)
             return true
         }
         if (event.key === Qt.Key_V && root.modelRef.can_paste && !root.isReadOnlyPath(root.modelRef.current_path)) {
             root.modelRef.paste_into_current()
+            return true
+        }
+        if (event.key === Qt.Key_A) {
+            root.selectAllEntries()
             return true
         }
         return false
@@ -831,7 +958,7 @@ ApplicationWindow {
                         Drag.source: detailsDelegate
                         Drag.supportedActions: Qt.CopyAction | Qt.MoveAction
                         Drag.proposedAction: Qt.MoveAction
-                        Drag.mimeData: { "text/uri-list": root.pathToFileUrl(path) }
+                        Drag.mimeData: { "text/uri-list": root.dragMimeText(path) }
                         onXChanged: if (!detailsFileMouse.drag.active) x = 0
                         onYChanged: if (!detailsFileMouse.drag.active) y = 0
                     }
@@ -839,10 +966,10 @@ ApplicationWindow {
                     Rectangle {
                         anchors.fill: parent
                         radius: 8
-                        color: fileList.currentIndex === index
+                        color: root.isPathSelected(path) || fileList.currentIndex === index
                             ? root.rowSelectedColor
                             : (index % 2 === 0 ? root.rowEvenColor : root.rowOddColor)
-                        border.width: root.dropTargetPath === path ? 2 : (fileList.currentIndex === index ? 1 : 0)
+                        border.width: root.dropTargetPath === path ? 2 : (root.isPathSelected(path) || fileList.currentIndex === index ? 1 : 0)
                         border.color: root.accentColor
                     }
 
@@ -951,6 +1078,7 @@ ApplicationWindow {
                     MouseArea {
                         id: detailsFileMouse
                         anchors.fill: parent
+                        hoverEnabled: true
                         acceptedButtons: Qt.LeftButton | Qt.RightButton
                         drag.target: detailsDragAnchor
                         onClicked: {
@@ -961,7 +1089,7 @@ ApplicationWindow {
                                 return
                             }
                             fileList.currentIndex = index
-                            root.selectEntry(path, name)
+                            root.selectEntry(path, name, mouse.modifiers & Qt.ControlModifier)
                             fileList.forceActiveFocus()
                         }
                         onPressed: {
@@ -979,6 +1107,37 @@ ApplicationWindow {
                             root.activeDragPath = ""
                         }
                         onDoubleClicked: root.activateCurrentSelection(path, isDirectory)
+                    }
+
+                    Rectangle {
+                        width: 18
+                        height: 18
+                        radius: 9
+                        x: 4
+                        anchors.verticalCenter: parent.verticalCenter
+                        z: 5
+                        visible: root.selectionMarkerVisible(path, detailsFileMouse.containsMouse)
+                        color: root.selectionMarkerColor(path)
+                        border.width: 1
+                        border.color: root.accentColor
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: root.selectionMarkerText(path)
+                            color: root.selectionMarkerTextColor(path)
+                            font.pixelSize: 13
+                            font.bold: true
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            acceptedButtons: Qt.LeftButton
+                            onClicked: {
+                                root.toggleEntrySelection(path, name)
+                                fileList.currentIndex = index
+                                fileList.forceActiveFocus()
+                            }
+                        }
                     }
 
                     DropArea {
@@ -1131,14 +1290,14 @@ ApplicationWindow {
                     Drag.source: compactDelegate
                     Drag.supportedActions: Qt.CopyAction | Qt.MoveAction
                     Drag.proposedAction: Qt.MoveAction
-                    Drag.mimeData: { "text/uri-list": root.pathToFileUrl(path) }
+                    Drag.mimeData: { "text/uri-list": root.dragMimeText(path) }
                 }
 
                 Rectangle {
                     anchors.fill: parent
                     radius: 4
-                    color: compactList.currentIndex === index ? root.rowSelectedColor : "transparent"
-                    border.width: root.dropTargetPath === path ? 2 : (compactList.currentIndex === index ? 1 : 0)
+                    color: root.isPathSelected(path) || compactList.currentIndex === index ? root.rowSelectedColor : "transparent"
+                    border.width: root.dropTargetPath === path ? 2 : (root.isPathSelected(path) || compactList.currentIndex === index ? 1 : 0)
                     border.color: root.accentColor
                 }
 
@@ -1208,6 +1367,7 @@ ApplicationWindow {
                 MouseArea {
                     id: compactFileMouse
                     anchors.fill: parent
+                    hoverEnabled: true
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
                     drag.target: compactDragAnchor
                     onClicked: {
@@ -1218,7 +1378,7 @@ ApplicationWindow {
                             return
                         }
                         compactList.currentIndex = index
-                        root.selectEntry(path, name)
+                        root.selectEntry(path, name, mouse.modifiers & Qt.ControlModifier)
                         compactList.forceActiveFocus()
                     }
                     onPressed: {
@@ -1236,6 +1396,38 @@ ApplicationWindow {
                         root.activeDragPath = ""
                     }
                     onDoubleClicked: root.activateCurrentSelection(path, isDirectory)
+                }
+
+                Rectangle {
+                    width: 18
+                    height: 18
+                    radius: 9
+                    anchors.left: parent.left
+                    anchors.leftMargin: 4
+                    anchors.verticalCenter: parent.verticalCenter
+                    z: 5
+                    visible: root.selectionMarkerVisible(path, compactFileMouse.containsMouse)
+                    color: root.selectionMarkerColor(path)
+                    border.width: 1
+                    border.color: root.accentColor
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: root.selectionMarkerText(path)
+                        color: root.selectionMarkerTextColor(path)
+                        font.pixelSize: 13
+                        font.bold: true
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        acceptedButtons: Qt.LeftButton
+                        onClicked: {
+                            root.toggleEntrySelection(path, name)
+                            compactList.currentIndex = index
+                            compactList.forceActiveFocus()
+                        }
+                    }
                 }
 
                 DropArea {
@@ -1337,7 +1529,7 @@ ApplicationWindow {
                                         Drag.source: groupedListDelegate
                                         Drag.supportedActions: Qt.CopyAction | Qt.MoveAction
                                         Drag.proposedAction: Qt.MoveAction
-                                        Drag.mimeData: { "text/uri-list": root.pathToFileUrl(modelData.path) }
+                                        Drag.mimeData: { "text/uri-list": root.dragMimeText(modelData.path) }
                                     }
 
                                     Row {
@@ -1401,9 +1593,19 @@ ApplicationWindow {
                                         }
                                     }
 
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        visible: root.isPathSelected(modelData.path)
+                                        z: -1
+                                        color: root.rowSelectedColor
+                                        opacity: 0.55
+                                        radius: 4
+                                    }
+
                                     MouseArea {
                                         id: groupedListFileMouse
                                         anchors.fill: parent
+                                        hoverEnabled: true
                                         acceptedButtons: Qt.LeftButton | Qt.RightButton
                                         drag.target: groupedListDragAnchor
                                         onClicked: {
@@ -1411,7 +1613,7 @@ ApplicationWindow {
                                                 root.openFileContextMenu(modelData.path, modelData.name, modelData.is_directory, groupedListFileMouse, mouse)
                                                 return
                                             }
-                                            root.selectEntry(modelData.path, modelData.name)
+                                            root.selectEntry(modelData.path, modelData.name, mouse.modifiers & Qt.ControlModifier)
                                         }
                                         onPressed: {
                                             if (mouse.button === Qt.LeftButton && !root.isReadOnlyPath(modelData.path))
@@ -1428,6 +1630,34 @@ ApplicationWindow {
                                             root.activeDragPath = ""
                                         }
                                         onDoubleClicked: root.activateCurrentSelection(modelData.path, modelData.is_directory)
+                                    }
+
+                                    Rectangle {
+                                        width: 16
+                                        height: 16
+                                        radius: 8
+                                        anchors.left: parent.left
+                                        anchors.leftMargin: 2
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        z: 5
+                                        visible: root.selectionMarkerVisible(modelData.path, groupedListFileMouse.containsMouse)
+                                        color: root.selectionMarkerColor(modelData.path)
+                                        border.width: 1
+                                        border.color: root.accentColor
+
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: root.selectionMarkerText(modelData.path)
+                                            color: root.selectionMarkerTextColor(modelData.path)
+                                            font.pixelSize: 12
+                                            font.bold: true
+                                        }
+
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            acceptedButtons: Qt.LeftButton
+                                            onClicked: root.toggleEntrySelection(modelData.path, modelData.name)
+                                        }
                                     }
 
                                     Rectangle {
@@ -1528,14 +1758,14 @@ ApplicationWindow {
                     Drag.source: iconDelegate
                     Drag.supportedActions: Qt.CopyAction | Qt.MoveAction
                     Drag.proposedAction: Qt.MoveAction
-                    Drag.mimeData: { "text/uri-list": root.pathToFileUrl(path) }
+                    Drag.mimeData: { "text/uri-list": root.dragMimeText(path) }
                 }
 
                 Rectangle {
                     anchors.fill: parent
                     radius: 10
-                    color: iconGrid.currentIndex === index ? root.rowSelectedColor : "transparent"
-                    border.width: root.dropTargetPath === path ? 2 : (iconGrid.currentIndex === index ? 1 : 0)
+                    color: root.isPathSelected(path) || iconGrid.currentIndex === index ? root.rowSelectedColor : "transparent"
+                    border.width: root.dropTargetPath === path ? 2 : (root.isPathSelected(path) || iconGrid.currentIndex === index ? 1 : 0)
                     border.color: root.accentColor
                 }
 
@@ -1606,6 +1836,7 @@ ApplicationWindow {
                 MouseArea {
                     id: iconFileMouse
                     anchors.fill: parent
+                    hoverEnabled: true
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
                     drag.target: iconDragAnchor
                     onClicked: {
@@ -1616,7 +1847,7 @@ ApplicationWindow {
                             return
                         }
                         iconGrid.currentIndex = index
-                        root.selectEntry(path, name)
+                        root.selectEntry(path, name, mouse.modifiers & Qt.ControlModifier)
                         iconGrid.forceActiveFocus()
                     }
                     onPressed: {
@@ -1634,6 +1865,39 @@ ApplicationWindow {
                         root.activeDragPath = ""
                     }
                     onDoubleClicked: root.activateCurrentSelection(path, isDirectory)
+                }
+
+                Rectangle {
+                    width: 20
+                    height: 20
+                    radius: 10
+                    anchors.left: parent.left
+                    anchors.leftMargin: 6
+                    anchors.top: parent.top
+                    anchors.topMargin: 6
+                    z: 5
+                    visible: root.selectionMarkerVisible(path, iconFileMouse.containsMouse)
+                    color: root.selectionMarkerColor(path)
+                    border.width: 1
+                    border.color: root.accentColor
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: root.selectionMarkerText(path)
+                        color: root.selectionMarkerTextColor(path)
+                        font.pixelSize: 14
+                        font.bold: true
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        acceptedButtons: Qt.LeftButton
+                        onClicked: {
+                            root.toggleEntrySelection(path, name)
+                            iconGrid.currentIndex = index
+                            iconGrid.forceActiveFocus()
+                        }
+                    }
                 }
 
                 DropArea {
@@ -1736,14 +2000,14 @@ ApplicationWindow {
                                         Drag.source: groupedIconDelegate
                                         Drag.supportedActions: Qt.CopyAction | Qt.MoveAction
                                         Drag.proposedAction: Qt.MoveAction
-                                        Drag.mimeData: { "text/uri-list": root.pathToFileUrl(modelData.path) }
+                                        Drag.mimeData: { "text/uri-list": root.dragMimeText(modelData.path) }
                                     }
 
                                     Rectangle {
                                         anchors.fill: parent
                                         radius: 10
-                                        color: root.selectedPath === modelData.path ? root.rowSelectedColor : "transparent"
-                                        border.width: root.dropTargetPath === modelData.path ? 2 : (root.selectedPath === modelData.path ? 1 : 0)
+                                        color: root.isPathSelected(modelData.path) ? root.rowSelectedColor : "transparent"
+                                        border.width: root.dropTargetPath === modelData.path ? 2 : (root.isPathSelected(modelData.path) ? 1 : 0)
                                         border.color: root.accentColor
                                     }
 
@@ -1814,6 +2078,7 @@ ApplicationWindow {
                                     MouseArea {
                                         id: groupedIconFileMouse
                                         anchors.fill: parent
+                                        hoverEnabled: true
                                         acceptedButtons: Qt.LeftButton | Qt.RightButton
                                         drag.target: groupedIconDragAnchor
                                         onClicked: {
@@ -1821,7 +2086,7 @@ ApplicationWindow {
                                                 root.openFileContextMenu(modelData.path, modelData.name, modelData.is_directory, groupedIconFileMouse, mouse)
                                                 return
                                             }
-                                            root.selectEntry(modelData.path, modelData.name)
+                                            root.selectEntry(modelData.path, modelData.name, mouse.modifiers & Qt.ControlModifier)
                                         }
                                         onPressed: {
                                             if (mouse.button === Qt.LeftButton && !root.isReadOnlyPath(modelData.path))
@@ -1838,6 +2103,35 @@ ApplicationWindow {
                                             root.activeDragPath = ""
                                         }
                                         onDoubleClicked: root.activateCurrentSelection(modelData.path, modelData.is_directory)
+                                    }
+
+                                    Rectangle {
+                                        width: 20
+                                        height: 20
+                                        radius: 10
+                                        anchors.left: parent.left
+                                        anchors.leftMargin: 6
+                                        anchors.top: parent.top
+                                        anchors.topMargin: 6
+                                        z: 5
+                                        visible: root.selectionMarkerVisible(modelData.path, groupedIconFileMouse.containsMouse)
+                                        color: root.selectionMarkerColor(modelData.path)
+                                        border.width: 1
+                                        border.color: root.accentColor
+
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: root.selectionMarkerText(modelData.path)
+                                            color: root.selectionMarkerTextColor(modelData.path)
+                                            font.pixelSize: 14
+                                            font.bold: true
+                                        }
+
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            acceptedButtons: Qt.LeftButton
+                                            onClicked: root.toggleEntrySelection(modelData.path, modelData.name)
+                                        }
                                     }
 
                                     DropArea {
@@ -2315,7 +2609,7 @@ ApplicationWindow {
 
             ToolButton {
                 text: "Rename"
-                enabled: root.modelRef !== null && root.selectedPath.length > 0 && !root.isVirtualPath(root.modelRef.current_path)
+                enabled: root.modelRef !== null && root.selectedCount === 1 && !root.isVirtualPath(root.modelRef.current_path)
                 display: AbstractButton.IconOnly
                 icon.source: root.toolbarIconSource("icon_rename.svg")
                 icon.width: root.toolbarIconSize
@@ -2454,14 +2748,14 @@ ApplicationWindow {
         }
         MenuSeparator {}
         MenuItem {
-            text: "Copy"
+            text: root.selectedPathsForAction(root.contextMenuPath).length > 1 ? "Copy Selected" : "Copy"
             enabled: root.contextMenuHasTarget && !root.isReadOnlyPath(root.contextMenuPath)
-            onTriggered: if (root.modelRef) root.modelRef.copy_path(root.contextMenuPath)
+            onTriggered: root.copyCurrentSelection(root.contextMenuPath)
         }
         MenuItem {
-            text: "Cut"
+            text: root.selectedPathsForAction(root.contextMenuPath).length > 1 ? "Cut Selected" : "Cut"
             enabled: root.contextMenuHasTarget && !root.isReadOnlyPath(root.contextMenuPath)
-            onTriggered: if (root.modelRef) root.modelRef.cut_path(root.contextMenuPath)
+            onTriggered: root.cutCurrentSelection(root.contextMenuPath)
         }
         MenuItem {
             text: "Paste"
@@ -2482,11 +2776,11 @@ ApplicationWindow {
         MenuSeparator {}
         MenuItem {
             text: "Rename"
-            enabled: root.contextMenuHasTarget && !root.isReadOnlyPath(root.contextMenuPath)
+            enabled: root.contextMenuHasTarget && root.selectedPathsForAction(root.contextMenuPath).length === 1 && !root.isReadOnlyPath(root.contextMenuPath)
             onTriggered: renameDialog.open()
         }
         MenuItem {
-            text: "Move to Trash"
+            text: root.selectedPathsForAction(root.contextMenuPath).length > 1 ? "Move Selected to Trash" : "Move to Trash"
             enabled: root.contextMenuHasTarget && !root.isReadOnlyPath(root.contextMenuPath)
             onTriggered: root.trashCurrentSelection(root.contextMenuPath)
         }
